@@ -1,0 +1,25 @@
+{
+  "name": "Frecuencia Cero – Letras y eventos",
+  "short_name": "Frecuencia Cero",
+  "description": "Repertorio musical, letras, acordes y carpetas de eventos de Frecuencia Cero.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f6f4ef",
+  "theme_color": "#171717",
+  "icons": [
+    {
+      "src": "./icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
