@@ -1,11 +1,13 @@
-const CACHE_NAME = 'frecuencia-cero-shell-v1';
+const CACHE_NAME = 'frecuencia-cero-shell-v3';
 const APP_FILES = [
   './',
   './index.html',
   './manifest.webmanifest',
   './icon-192.png',
   './icon-512.png',
-  './apple-touch-icon.png'
+  './apple-touch-icon.png',
+  './icon-192-maskable.png',
+  './icon-512-maskable.png'
 ];
 
 self.addEventListener('install', (event) => {
