@@ -1,7 +1,8 @@
-const CACHE_NAME = 'frecuencia-cero-shell-v4';
+const CACHE_NAME = 'frecuencia-cero-shell-v5-roles-sync';
 const APP_FILES = [
   './',
   './index.html',
+  './fc-sync.js',
   './manifest.webmanifest',
   './icon-192.png',
   './icon-512.png',

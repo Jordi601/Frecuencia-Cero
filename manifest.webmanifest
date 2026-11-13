@@ -1,7 +1,7 @@
 {
   "name": "Frecuencia Cero – Letras y eventos",
   "short_name": "Frecuencia Cero",
-  "description": "Repertorio musical, letras, acordes y carpetas de eventos de Frecuencia Cero.",
+  "description": "Repertorio musical, letras, acordes, eventos, perfiles y sincronización de Frecuencia Cero.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

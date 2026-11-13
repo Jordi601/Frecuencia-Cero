@@ -498,6 +498,12 @@ load();seedCatalog();seedLegacyEvent();syncModeButton();setNotation();render();
 </script>
 
 
+<!-- Firebase compat SDK: autenticación y sincronización en tiempo real -->
+<script src="https://www.gstatic.com/firebasejs/13.3.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/13.3.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/13.3.0/firebase-database-compat.js"></script>
+<script src="./fc-sync.js"></script>
+
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function () {
