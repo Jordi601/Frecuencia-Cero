@@ -63,7 +63,7 @@ input,textarea,select{width:100%;background:var(--card);border:1px solid var(--l
 .event-picker-row{display:flex;align-items:center;gap:9px;padding:9px 11px;border-bottom:1px solid var(--line);font-size:14px}
 .event-picker-row input{width:19px;min-height:19px;height:19px;margin:0;accent-color:var(--acc)}
 .event-picker-row span{flex:1}
-.event-editor-actions{display:flex;gap:7px;position:sticky;bottom:-12px;background:var(--bg);padding:10px 0 calc(4px + env(safe-area-inset-bottom,0px))}
+.event-editor-actions{display:flex;gap:7px;position:sticky;bottom:-12px;background:var(--bg);padding:10px 0 4px}
 .event-editor-actions button{flex:1;padding:8px 5px;font-size:13px}
 button.danger{color:#b3261e;border-color:#e2a2a2}
 .playlist-toolbar{display:flex;align-items:center;gap:7px;padding:8px 12px;border-bottom:1px solid var(--line);flex-wrap:wrap}
@@ -182,7 +182,7 @@ header>button{border-radius:12px;font-size:13px;font-weight:750}
 .events-empty p{margin:0 0 5px;max-width:260px;color:var(--mut);font-size:12px;line-height:1.5}
 .events-empty button{min-height:41px;border-radius:12px;padding:9px 15px;font-size:12px}
 .event-import{
- flex:0 0 auto;margin:7px 14px calc(12px + env(safe-area-inset-bottom,0px));padding:14px;
+ flex:0 0 auto;margin:7px 14px 12px;padding:14px;
  border:1px solid var(--line);border-radius:18px;border-top:1px solid var(--line);
  background:var(--card);box-shadow:0 4px 14px rgba(15,23,42,.04)
 }
@@ -197,7 +197,7 @@ header>button{border-radius:12px;font-size:13px;font-weight:750}
 /* Editor y lista del setlist */
 #vset>header,#vplaylist>header{padding:12px 13px}
 #eventEditorHeading,#playlistName{font-size:16px;line-height:1.2}
-.event-editor{gap:10px;padding:12px 14px calc(14px + env(safe-area-inset-bottom,0px))}
+.event-editor{gap:10px;padding:12px 14px 14px}
 .event-editor>input{border-radius:13px}
 .event-selected-row{border-radius:12px;padding:7px 8px}
 .event-picker{border-radius:14px}
@@ -209,7 +209,7 @@ header>button{border-radius:12px;font-size:13px;font-weight:750}
 .playlist-number{display:grid;place-items:center;width:27px;height:27px;min-width:27px;border-radius:9px;background:color-mix(in srgb,var(--acc) 9%,var(--card));color:var(--acc)}
 .playlist-open strong{font-size:14px}
 .playlist-open small{font-size:11px}
-.event-share-area{padding:12px 14px calc(14px + env(safe-area-inset-bottom,0px))}
+.event-share-area{padding:12px 14px 14px}
 .event-share-area textarea{border-radius:12px}
 
 /* Botones de herramientas uniformes sin reducir su área táctil */
@@ -230,6 +230,31 @@ header>button{border-radius:12px;font-size:13px;font-weight:750}
  .event-import{margin-left:12px;margin-right:12px;padding:12px}
 }
 @media(prefers-reduced-motion:reduce){button{transition:none}}
+
+/* Pantalla completa en iPhone (PWA / Agregar a pantalla de inicio).
+   El fondo llega hasta los bordes físicos; el contenido respeta las áreas seguras. */
+html,body{
+ width:100%;height:100%;min-height:100%;margin:0;
+ background:var(--bg);
+}
+html{overscroll-behavior:none}
+body{
+ position:fixed;inset:0;
+ width:100%;height:100vh;height:100dvh;
+ min-height:0;max-height:100dvh;
+ padding:0;overflow:hidden;
+ background:var(--bg);
+}
+.view{
+ width:100%;height:100%;min-height:0;
+ padding-top:env(safe-area-inset-top,0px);
+ padding-bottom:env(safe-area-inset-bottom,0px);
+ background:var(--bg);
+}
+@supports not (height:100dvh){
+ body{height:100%;max-height:100%;}
+ .view{height:100%;}
+}
 
 </style>
 

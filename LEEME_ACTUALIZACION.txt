@@ -17,3 +17,6 @@ Incluye:
 - Tarjetas y pantalla de eventos rediseñadas, incluyendo la importación de repertorios.
 
 Se conservan las canciones, letras, acordes y funciones de la aplicación.
+
+
+Actualización adicional iPhone (v4): se ajustó la pantalla para cubrir todo el display, incluido el fondo detrás del área del indicador de inicio. El contenido sigue respetando las áreas seguras de iOS para que botones y texto no queden debajo de la barra inferior. Se actualizó la caché del service worker a v4.
