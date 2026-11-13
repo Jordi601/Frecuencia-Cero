@@ -1,4 +1,4 @@
-const CACHE_NAME = 'frecuencia-cero-shell-v12-owner-onboarding-fix';
+const CACHE_NAME = 'frecuencia-cero-shell-v14-qr-generator-flow';
 const APP_FILES = [
   './',
   './index.html',

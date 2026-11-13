@@ -1,1 +1,2 @@
-Frecuencia Cero v12 - Corrección del primer dispositivo propietario. No exige QR para el primer teléfono; expone y permite copiar el UID Firebase actual para alinear las reglas de seguridad.
+Frecuencia Cero V14 - Generador QR visible y flujo de propietario.
+Se separan claramente las acciones: el dispositivo propietario crea la banda (si no existe) y genera el QR; los dispositivos no vinculados escanean el código. El UID propietario queda fijado al identificador confirmado por el usuario. Se conserva la protección para no sobrescribir bandas existentes. La caché del service worker cambia a v14.

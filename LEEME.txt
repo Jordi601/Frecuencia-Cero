@@ -1,7 +1,10 @@
-ACTUALIZACION V12 - INICIO DEL PROPIETARIO
+FRECUENCIA CERO V14 - GENERADOR QR VISIBLE
 
-Este paquete corrige el bloqueo del primer dispositivo. Al seleccionar Acordeonista ya no obliga a escanear un QR. Si el UID actual no coincide con el UID propietario configurado, la aplicación muestra el identificador y permite copiarlo desde la pantalla inicial o desde Más > Mi banda y sincronización.
-
-IMPORTANTE: Esta actualización NO cambia todavía las reglas de Firebase. No pulses Crear banda si aparece aviso de UID distinto. Envíanos el UID actual para generar las reglas que correspondan. No publiques reglas abiertas ni uses .read/.write true.
-
-Sube todos los archivos de este paquete a la raíz del repositorio GitHub Pages, reemplazando los anteriores. Luego espera al despliegue, cierra la PWA y vuelve a abrirla.
+1. Este paquete actualiza la web en GitHub Pages. Descomprime el ZIP y sube todo el contenido de esta carpeta a la raíz del repositorio, reemplazando los archivos anteriores.
+2. El UID del propietario técnico ya está configurado en fc-sync.js: qZCvhHTK3MUhcABIlZlRyrqHKdC2. No lo cambies.
+3. En el iPhone del propietario aparece el botón “Crear banda y generar código QR” si la banda aún no existe. Si la banda ya está creada y el propietario está conectado, el botón dice “Generar código QR para vincular otro dispositivo”.
+4. En un teléfono nuevo aparece “Escanear código QR”. Ese teléfono debe leer el QR que muestra el iPhone autorizado; no puede generar el primer QR mientras no esté vinculado.
+5. El QR dura 3 minutos y se usa una sola vez. Para otro teléfono, genera un QR nuevo desde un dispositivo ya autorizado.
+6. Las reglas de Firebase se publican por separado en Firebase Console. Authentication anónimo debe estar habilitado y Realtime Database debe tener reglas que permitan al UID propietario crear y administrar la banda, así como emitir y consumir emparejamientos.
+7. El flujo del botón comprueba la banda existente antes de crearla. Si encuentra una banda con otro propietario o una relación de miembro incompleta, se detiene y muestra el motivo; no sobrescribe datos.
+8. No cierres sesión ni borres los datos del sitio en el iPhone propietario, porque Firebase Authentication anónimo conserva la identidad local de ese dispositivo.

@@ -137,7 +137,12 @@
   function bandPath(child) { return 'bands/' + bandId + '/' + child; }
   function updateSyncButtons() {
     var signed = !!currentUser;
+    var ownerDevice = !!(currentUser && currentUser.uid === OWNER_UID);
     var connected = isConnected();
+    if (ownerDevice && !connected && selectedProfileRole !== 'accordionist') {
+      selectedProfileRole = 'accordionist';
+      localStorage.setItem(PROFILE_KEY, 'accordionist');
+    }
     if ($('fcSignIn')) $('fcSignIn').style.display = 'none';
     if ($('fcSignOut')) $('fcSignOut').style.display = 'none';
     if ($('fcFirebaseConfig')) $('fcFirebaseConfig').style.display = 'none';
@@ -150,19 +155,41 @@
       if (connected) $('fcProfileSelect').value = memberRole;
       else if (selectedProfileRole) $('fcProfileSelect').value = selectedProfileRole;
     }
-    if ($('fcProfileSave')) $('fcProfileSave').style.display = connected ? 'none' : '';
+    if ($('fcProfileSave')) $('fcProfileSave').style.display = (connected || ownerDevice) ? 'none' : '';
+    if ($('fcProfileSelect') && ownerDevice && !connected) $('fcProfileSelect').style.display = 'none';
     if ($('fcDeviceUid')) $('fcDeviceUid').textContent = currentUser ? currentUser.uid : 'Preparando identidad de este teléfono…';
     if ($('fcCopyUid')) $('fcCopyUid').style.display = currentUser && !connected ? '' : 'none';
-    if ($('fcCreateBand')) $('fcCreateBand').style.display = (!connected && selectedProfileRole === 'accordionist' && currentUser) ? '' : 'none';
-    if ($('fcCreateBand')) { $('fcCreateBand').disabled = !signed || connected; $('fcCreateBand').textContent = currentUser && currentUser.uid === OWNER_UID ? 'Crear banda como propietario técnico' : 'Revisar este teléfono como propietario'; }
+    // La creación inicial se integra al botón del QR: una acción clara para el propietario.
+    if ($('fcCreateBand')) $('fcCreateBand').style.display = 'none';
     if ($('fcOwnerMismatch')) $('fcOwnerMismatch').style.display = (!connected && selectedProfileRole === 'accordionist' && currentUser && currentUser.uid !== OWNER_UID) ? '' : 'none';
     if ($('fcCurrentOwnerUid')) $('fcCurrentOwnerUid').textContent = currentUser ? currentUser.uid : 'Preparando identidad…';
     if ($('fcRequestJoin')) $('fcRequestJoin').style.display = (!connected && selectedProfileRole && selectedProfileRole !== 'accordionist') ? '' : 'none';
     if ($('fcRequestJoin')) $('fcRequestJoin').disabled = !signed || !!(window.fcJoinRequestPending);
-    if ($('fcLinkDevice')) $('fcLinkDevice').style.display = connected ? '' : 'none';
-    if ($('fcScanDeviceLink')) $('fcScanDeviceLink').style.display = (!connected && signed) ? '' : 'none';
-    if ($('fcBandName')) $('fcBandName').style.display = (!connected && selectedProfileRole === 'accordionist' && currentUser) ? '' : 'none';
-    if ($('fcBandSummary')) $('fcBandSummary').textContent = connected ? ((bandMeta && bandMeta.name) || 'Frecuencia Cero') + ' · ' + roleName(memberRole) : (window.fcJoinRequestPending ? 'Solicitud enviada. Esperando aprobación del propietario técnico.' : (selectedProfileRole === 'accordionist' && currentUser && currentUser.uid !== OWNER_UID ? 'Este teléfono tiene una identidad distinta a la registrada como propietario. Copia el ID actual para actualizar la autorización inicial.' : 'Selecciona tu perfil en este teléfono.'));
+    if ($('fcLinkDevice')) {
+      $('fcLinkDevice').style.display = (connected || ownerDevice) ? '' : 'none';
+      $('fcLinkDevice').disabled = !signed;
+      $('fcLinkDevice').textContent = ownerDevice && !connected
+        ? '＋ Crear banda y generar código QR'
+        : '▦ Generar código QR para vincular otro dispositivo';
+    }
+    if ($('fcScanDeviceLink')) $('fcScanDeviceLink').style.display = (!connected && signed && !ownerDevice) ? '' : 'none';
+    if ($('fcPairHelp')) $('fcPairHelp').textContent = ownerDevice
+      ? (connected
+          ? 'Este es el dispositivo propietario. Pulsa Generar código QR y escanéalo desde el teléfono o tablet que quieras vincular.'
+          : 'Este iPhone está identificado como propietario. Pulsa el botón para crear la banda si aún no existe y generar el primer QR.')
+      : (connected
+          ? 'Genera un QR para vincular otro teléfono o tablet a tu mismo perfil.'
+          : 'Este dispositivo todavía no está vinculado. Escanea aquí el QR que genere un teléfono autorizado.');
+    if ($('fcBandName')) $('fcBandName').style.display = (!connected && ownerDevice) ? '' : 'none';
+    if ($('fcBandSummary')) $('fcBandSummary').textContent = connected
+      ? ((bandMeta && bandMeta.name) || 'Frecuencia Cero') + ' · ' + roleName(memberRole)
+      : (ownerDevice
+          ? 'Dispositivo propietario identificado. Pulsa “Crear banda y generar código QR” para iniciar la vinculación.'
+          : (window.fcJoinRequestPending
+              ? 'Solicitud enviada. Esperando aprobación del propietario técnico.'
+              : (selectedProfileRole === 'accordionist' && currentUser && currentUser.uid !== OWNER_UID
+                  ? 'Este teléfono tiene una identidad distinta a la registrada como propietario. Copia el ID actual para revisar la autorización inicial.'
+                  : 'Selecciona tu perfil en este teléfono.')));
     if ($('fcBandActions')) $('fcBandActions').style.display = connected ? '' : 'none';
     if ($('fcMemberAdmin')) $('fcMemberAdmin').style.display = connected && isTechnicalOwner() ? '' : 'none';
     if ($('fcMyDevicesBox')) $('fcMyDevicesBox').style.display = connected ? '' : 'none';
@@ -226,7 +253,11 @@
       }
       return;
     }
-    setStatus('Teléfono identificado. Selecciona tu perfil o vincula este dispositivo.', 'success');
+    if (user.uid === OWNER_UID) {
+      selectedProfileRole = 'accordionist';
+      localStorage.setItem(PROFILE_KEY, 'accordionist');
+    }
+    setStatus(user.uid === OWNER_UID ? 'Dispositivo propietario identificado. Aquí podrás crear la banda y generar los códigos QR.' : 'Teléfono identificado. Selecciona tu perfil o escanea el QR de un dispositivo autorizado.', 'success');
     setText('fcDeviceUid', user.uid);
     setText('fcGateUid', user.uid);
     if (selectedProfileRole) hideFirstProfileGate();
@@ -314,17 +345,22 @@
         live: { eventId: null, songId: null, position: -1, rowIndex: 0, chordIndex: -1, paused: true, changedAt: now, changedBy: currentUser.uid }
       };
       initial.members[currentUser.uid] = { role: 'accordionist', name: ROLE_LABELS.accordionist, memberUid: currentUser.uid, isOwner: true, joinedAt: now, deviceType: 'anonymous' };
-      await db.ref('bands/' + FIXED_BAND_ID).set(initial);
+      var bandRootRef = db.ref('bands/' + FIXED_BAND_ID);
+      var existingBand = await bandRootRef.once('value');
+      if (existingBand.exists()) throw new Error('Ya existe una banda en Firebase. No sobrescribí sus integrantes, catálogo ni eventos. Antes de continuar debemos revisar si esa banda ya fue creada.');
+      await bandRootRef.set(initial);
       bandId = FIXED_BAND_ID; localStorage.setItem(BAND_KEY, bandId);
       memberRole = 'accordionist'; memberProfile = initial.members[currentUser.uid]; bandMeta = initial.meta;
       selectedProfileRole = 'accordionist'; localStorage.setItem(PROFILE_KEY, 'accordionist');
       lastCatalogJson = safeJson(mapById(window.songs || [])); lastEventsJson = safeJson(mapById(window.events || []));
       attachedUid = ''; identityKind = 'members';
       await attachBand(FIXED_BAND_ID, 'members');
-      setStatus('Banda creada. Este teléfono es el propietario técnico y conserva el perfil Acordeonista. Voz 1 se incorporará como director musical.', 'success');
+      setStatus('Banda creada. Este teléfono es el propietario técnico. Ahora puedes generar el QR para vincular otro dispositivo.', 'success');
+      return true;
     } catch (err) {
-      var detail = err && err.code === 'PERMISSION_DENIED' ? 'Firebase rechazó la creación. Publica las reglas con el UID autorizado del propietario técnico (perfil Acordeonista).' : (err.message || 'Error desconocido.');
+      var detail = err && err.code === 'PERMISSION_DENIED' ? 'Firebase rechazó la creación. Publica las reglas de Realtime Database con el UID autorizado del propietario técnico.' : (err.message || 'Error desconocido.');
       setStatus('No se pudo crear la banda: ' + detail, 'error');
+      return false;
     }
   }
   async function requestJoin() {
@@ -455,11 +491,15 @@
   async function createDevicePairing() {
     try {
       if (!isConnected() || !memberProfile) throw new Error('Primero debes tener un perfil autorizado en la banda.');
-      var token = randomTokenHex();
       var memberUid = canonicalMemberUid();
+      var memberSnap = await db.ref(memberPath() + '/' + memberUid).once('value');
+      var canonicalMember = memberSnap.val();
+      if (!canonicalMember || !canonicalMember.role || canonicalMember.role === 'pending') throw new Error('No se encontró la función actual de este integrante. Vuelve a conectar el perfil antes de generar el QR.');
+      var pairingRole = canonicalMember.role;
+      var token = randomTokenHex();
       var expiresAt = Date.now() + 180000;
       var pairing = {
-        role: memberRole,
+        role: pairingRole,
         memberUid: memberUid,
         createdBy: currentUser.uid,
         createdAt: firebase.database.ServerValue.TIMESTAMP,
@@ -501,6 +541,45 @@
       setStatus('QR generado. Escanéalo desde el dispositivo que quieres vincular.', 'success');
     } catch (err) { setStatus('No se pudo generar el QR: ' + (err.message || err), 'error'); }
   }
+  async function handleGeneratePairQr() {
+    try {
+      if (!currentUser || !db) throw new Error('Espera a que Firebase identifique este dispositivo.');
+      if (currentUser.uid === OWNER_UID && !isConnected()) {
+        selectedProfileRole = 'accordionist';
+        localStorage.setItem(PROFILE_KEY, 'accordionist');
+        updateSyncButtons();
+        var rootRef = db.ref('bands/' + FIXED_BAND_ID);
+        var rootSnap = await rootRef.once('value');
+        if (!rootSnap.exists()) {
+          setStatus('Creando la banda como propietario técnico…', 'neutral');
+          var created = await createBand();
+          if (!created || !isConnected()) return;
+        } else {
+          var rootData = rootSnap.val() || {};
+          var meta = rootData.meta || {};
+          if (meta.ownerUid !== OWNER_UID) {
+            throw new Error('Ya existe una banda con ese identificador, pero no está registrada a nombre de este propietario. No modifiqué ningún dato. Hay que revisar la banda existente en Firebase.');
+          }
+          var ownerMember = rootData.members && rootData.members[OWNER_UID];
+          if (!ownerMember || !ownerMember.role) {
+            throw new Error('Firebase reconoce el UID como propietario, pero no encuentra su integrante en /members. No sobrescribí la banda. Hay que reparar esa relación en Firebase antes de emitir QR.');
+          }
+          bandMeta = meta;
+          activateMembership(ownerMember, 'members');
+          await attachBand(FIXED_BAND_ID, 'members');
+        }
+      }
+      if (!isConnected() || !memberProfile) throw new Error('Este dispositivo aún no tiene un perfil autorizado. Completa primero la creación o aprobación de la banda.');
+      await createDevicePairing();
+    } catch (err) {
+      var message = err && err.code === 'PERMISSION_DENIED'
+        ? 'Firebase bloqueó la operación. Revisa que Authentication anónimo esté habilitado y que hayas publicado las reglas de Realtime Database para este propietario.'
+        : (err.message || 'No se pudo preparar la vinculación.');
+      setStatus('No se pudo generar el QR: ' + message, 'error');
+      alert(message);
+    }
+  }
+
   function extractPairToken(text) {
     try {
       var u = new URL(text);
@@ -608,8 +687,12 @@
       var occupied = Object.keys(memberList || {}).find(function (otherUid) { return otherUid !== uid && memberList[otherUid] && memberList[otherUid].role === role; });
       if (occupied) { alert('La función ' + roleName(role) + ' ya está asignada a otro integrante. Cada una de las seis funciones debe tener una sola persona.'); renderMemberAdmin(); return; }
     }
-    try { await db.ref(memberPath() + '/' + uid).update({ role: role, name: roleName(role) }); }
-    catch (err) { setStatus('No se pudo cambiar el rol: ' + err.message, 'error'); }
+    try {
+      await db.ref(memberPath() + '/' + uid).update({ role: role, name: roleName(role) });
+      var linkedIds = Object.keys(deviceList || {}).filter(function (deviceUid) { return deviceList[deviceUid] && deviceList[deviceUid].memberUid === uid; });
+      await Promise.all(linkedIds.map(function (deviceUid) { return db.ref(bandPath('devices/' + deviceUid)).update({ role: role, name: roleName(role) }); }));
+      setStatus('Función actualizada. También se sincronizó en sus dispositivos vinculados.', 'success');
+    } catch (err) { setStatus('No se pudo cambiar el rol: ' + (err.message || err), 'error'); }
   }
   async function revokeDevice(deviceUid) {
     if (!isConnected() || !db) return;
@@ -1132,9 +1215,9 @@
     var menu = document.querySelector('#vm .menu-content');
     if (menu && !$('fcSyncPanel')) {
       var panel = document.createElement('section'); panel.id = 'fcSyncPanel'; panel.className = 'fc-sync-panel';
-      panel.innerHTML = '<div class="fc-panel-head"><div><strong>Mi banda y sincronización</strong><p class="note">La primera vez eliges tu perfil. Después queda guardado en este dispositivo. El propietario técnico autoriza integrantes y cada músico puede vincular sus propias tablets o teléfonos mediante QR.</p></div><span class="fc-panel-icon">☁️</span></div>' +
+      panel.innerHTML = '<div class="fc-panel-head"><div><strong>Mi banda y sincronización</strong><p class="note">La primera vez eliges tu perfil. Para incorporar a otra persona, debe solicitar acceso y el propietario la aprueba. El QR sirve para vincular otro teléfono o tablet al mismo perfil.</p></div><span class="fc-panel-icon">☁️</span></div>' +
         '<div id="fcSyncStatus" class="fc-status neutral">Conectando con Firebase…</div>' +
-        '<div class="fc-band-box"><strong>Mi perfil en Frecuencia Cero</strong><label class="fc-field-label" for="fcProfileSelect">Selecciona quién utiliza este teléfono</label><select id="fcProfileSelect"><option value="">Seleccionar perfil…</option><option value="voice1">Voz 1 · Hombre (Director)</option><option value="voice2">Voz 2 · Mujer</option><option value="bass">Bajista</option><option value="accordionist">Acordeonista</option><option value="drummer">Baterista</option><option value="keyboardist">Tecladista</option></select><button id="fcProfileSave" class="p">Guardar mi perfil</button><p id="fcBandSummary" class="note">Selecciona tu perfil para continuar.</p><label class="fc-field-label" for="fcBandName">Nombre de la banda</label><input id="fcBandName" placeholder="Frecuencia Cero" value="Frecuencia Cero"><button id="fcCreateBand" class="p" style="display:none">Crear banda como propietario técnico</button><div id="fcOwnerMismatch" class="fc-pair-box" style="display:none"><strong>Este parece ser el primer dispositivo, pero el UID no coincide con el propietario configurado.</strong><p class="note">No necesitas QR para iniciar la banda. Copia este ID actual y actualizaremos la autorización de Firebase.</p><code id="fcCurrentOwnerUid"></code><button type="button" id="fcCopyCurrentOwnerUid">Copiar ID actual</button></div><button id="fcRequestJoin" class="p" style="display:none">Solicitar incorporación</button><p class="note">El primer teléfono del Acordeonista crea la banda como propietario técnico. Si el UID no coincide con el autorizado, copia el ID actual y actualizaremos la regla; no uses QR para el primer teléfono. Voz 1 dirige los eventos. Cada integrante puede vincular otros dispositivos mediante QR.</p><div class="note">ID de este teléfono: <code id="fcDeviceUid">Preparando…</code> <button id="fcCopyUid" style="display:none">Copiar ID</button></div><button id="fcLinkDevice" class="p" style="display:none">▦ Vincular otro dispositivo con QR</button><div id="fcPairQrBox" class="fc-pair-box" style="display:none"></div><button id="fcScanDeviceLink" style="display:none">📷 Escanear QR para vincular este dispositivo</button><div id="fcPairScannerWrap" class="fc-pair-box" style="display:none"><div id="fcPairScanner"></div><p id="fcPairScannerStatus" class="note">Preparando cámara…</p><button type="button" id="fcPairScannerClose">Cerrar cámara</button></div></div>' +
+        '<div class="fc-band-box"><strong>Mi perfil en Frecuencia Cero</strong><label class="fc-field-label" for="fcProfileSelect">Selecciona quién utiliza este teléfono</label><select id="fcProfileSelect"><option value="">Seleccionar perfil…</option><option value="voice1">Voz 1 · Hombre (Director)</option><option value="voice2">Voz 2 · Mujer</option><option value="bass">Bajista</option><option value="accordionist">Acordeonista</option><option value="drummer">Baterista</option><option value="keyboardist">Tecladista</option></select><button id="fcProfileSave" class="p">Guardar mi perfil</button><p id="fcBandSummary" class="note">Selecciona tu perfil para continuar.</p><label class="fc-field-label" for="fcBandName">Nombre de la banda</label><input id="fcBandName" placeholder="Frecuencia Cero" value="Frecuencia Cero"><button id="fcCreateBand" class="p" style="display:none">Crear banda como propietario técnico</button><div id="fcOwnerMismatch" class="fc-pair-box" style="display:none"><strong>Este parece ser el primer dispositivo, pero el UID no coincide con el propietario configurado.</strong><p class="note">No necesitas QR para iniciar la banda. Copia este ID actual y actualizaremos la autorización de Firebase.</p><code id="fcCurrentOwnerUid"></code><button type="button" id="fcCopyCurrentOwnerUid">Copiar ID actual</button></div><button id="fcRequestJoin" class="p" style="display:none">Solicitar incorporación</button><p class="note">El primer teléfono del Acordeonista crea la banda como propietario técnico. Las demás personas eligen su función y solicitan incorporación; el propietario las aprueba. El QR se usa únicamente para vincular otro teléfono o tablet al mismo perfil. Voz 1 dirige los eventos.</p><div class="note">ID de este teléfono: <code id="fcDeviceUid">Preparando…</code> <button id="fcCopyUid" style="display:none">Copiar ID</button></div><div id="fcPairActions" class="fc-pair-actions"><div class="fc-member-head"><strong>Vincular otro dispositivo</strong></div><p id="fcPairHelp" class="note">El dispositivo autorizado genera el QR; el dispositivo nuevo lo escanea.</p><button id="fcLinkDevice" class="p" style="display:none">▦ Generar código QR</button><button id="fcScanDeviceLink" class="p" style="display:none">📷 Escanear código QR</button></div><div id="fcPairQrBox" class="fc-pair-box" style="display:none"></div><div id="fcPairScannerWrap" class="fc-pair-box" style="display:none"><div id="fcPairScanner"></div><p id="fcPairScannerStatus" class="note">Preparando cámara…</p><button type="button" id="fcPairScannerClose">Cerrar cámara</button></div></div>' +
         '<div id="fcJoinRequests" class="fc-member-admin" style="display:none"><div class="fc-member-head"><strong>Solicitudes de integrantes</strong></div><div id="fcJoinRequestsList"></div></div>' +
         '<div id="fcMemberAdmin" class="fc-member-admin" style="display:none"><div class="fc-member-head"><strong>Integrantes y funciones (6 plazas)</strong><span id="fcOnlineCount" class="note"></span></div><p class="note">El propietario técnico administra el catálogo, integrantes y dispositivos. Voz 1 dirige los eventos y puede crear y organizar repertorios. Cada función se asigna a una sola persona.</p><div id="fcMembers"></div></div>' +
         '<div id="fcMyDevicesBox" class="fc-member-admin" style="display:none"><div class="fc-member-head"><strong>Mis dispositivos vinculados</strong></div><p class="note">Puedes vincular varios teléfonos o tablets a tu mismo perfil y revocar los que ya no utilices.</p><div id="fcMyDevices"></div></div>' +
@@ -1143,7 +1226,7 @@
     }
     if (!$('fcFirstProfileGate')) {
       var gate = document.createElement('div'); gate.id = 'fcFirstProfileGate'; gate.className = 'fc-profile-gate'; gate.style.display = 'none';
-      gate.innerHTML = '<div class="fc-profile-card"><div class="fc-profile-brand">♫</div><strong class="fc-profile-title">Frecuencia Cero</strong><p class="note">Primera configuración: selecciona quién utiliza este dispositivo. Se guardará para las próximas veces.</p><div class="fc-profile-grid"><button data-role="voice1"><b>🎤 Voz 1</b><small>Director musical</small></button><button data-role="voice2"><b>🎤 Voz 2</b><small>Cantante</small></button><button data-role="bass"><b>🎸 Bajista</b><small>Acordes</small></button><button data-role="accordionist"><b>🪗 Acordeonista</b><small>Acordeón / guitarra</small></button><button data-role="drummer"><b>🥁 Baterista</b><small>Seguimiento</small></button><button data-role="keyboardist"><b>🎹 Tecladista</b><small>Teclado / guitarra</small></button></div><p class="note fc-profile-foot">Si es tu primer dispositivo, elige tu perfil. Si es un segundo dispositivo, utiliza el QR de un dispositivo ya autorizado.</p><div class="note">ID de este teléfono: <code id="fcGateUid">Preparando…</code> <button type="button" id="fcGateCopyUid">Copiar ID</button></div><button type="button" id="fcProfileGateQr">Ya tengo un QR para vincular</button></div>';
+      gate.innerHTML = '<div class="fc-profile-card"><div class="fc-profile-brand">♫</div><strong class="fc-profile-title">Frecuencia Cero</strong><p class="note">Primera configuración: selecciona quién utiliza este dispositivo. Se guardará para las próximas veces.</p><div class="fc-profile-grid"><button data-role="voice1"><b>🎤 Voz 1</b><small>Director musical</small></button><button data-role="voice2"><b>🎤 Voz 2</b><small>Cantante</small></button><button data-role="bass"><b>🎸 Bajista</b><small>Acordes</small></button><button data-role="accordionist"><b>🪗 Acordeonista</b><small>Acordeón / guitarra</small></button><button data-role="drummer"><b>🥁 Baterista</b><small>Seguimiento</small></button><button data-role="keyboardist"><b>🎹 Tecladista</b><small>Teclado / guitarra</small></button></div><p class="note fc-profile-foot">Si eres otra persona que se incorpora a la banda, elige tu función y solicita acceso. Si es otro teléfono o tablet de alguien ya autorizado, escanea el QR que genere uno de sus dispositivos.</p><div class="note">ID de este teléfono: <code id="fcGateUid">Preparando…</code> <button type="button" id="fcGateCopyUid">Copiar ID</button></div><button type="button" id="fcProfileGateQr">Ya tengo un QR para vincular</button></div>';
       document.body.appendChild(gate);
       Array.prototype.forEach.call(gate.querySelectorAll('[data-role]'), function (button) {
         button.onclick = function () {
@@ -1185,7 +1268,7 @@
     if ($('fcSignOut')) $('fcSignOut').onclick = signOut;
     if ($('fcCreateBand')) $('fcCreateBand').onclick = createBand;
     if ($('fcRequestJoin')) $('fcRequestJoin').onclick = requestJoin;
-    if ($('fcLinkDevice')) $('fcLinkDevice').onclick = createDevicePairing;
+    if ($('fcLinkDevice')) $('fcLinkDevice').onclick = handleGeneratePairQr;
     if ($('fcScanDeviceLink')) $('fcScanDeviceLink').onclick = startPairScanner;
     if ($('fcPairScannerClose')) $('fcPairScannerClose').onclick = stopPairScanner;
     if ($('fcProfileSave')) $('fcProfileSave').onclick = function () {
@@ -1235,7 +1318,7 @@
       '.fc-panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}.fc-panel-head strong{font-size:17px}.fc-panel-icon{font-size:25px}' +
       '.fc-status{padding:9px 11px;border-radius:10px;font-size:13px;font-weight:700;background:var(--bg)}.fc-status.success{color:#16764b;background:rgba(22,139,88,.10)}.fc-status.warning{color:#946200;background:rgba(220,160,30,.13)}.fc-status.error{color:#b3261e;background:rgba(179,38,30,.10)}' +
       '.fc-field-label{font-size:12px;color:var(--mut);font-weight:800;margin-top:3px}.fc-auth-row,.fc-invite-row{display:flex;gap:7px}.fc-auth-row button,.fc-invite-row button{flex:1;min-width:0}.fc-band-box{border-top:1px solid var(--line);padding-top:10px;display:flex;flex-direction:column;gap:8px}.fc-member-admin{border-top:1px solid var(--line);padding-top:10px}.fc-member-head{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:8px}.fc-member-row{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line)}.fc-member-info{flex:1;min-width:0}.fc-member-info strong,.fc-member-info small{display:block;overflow-wrap:anywhere}.fc-member-info small{font-size:11px;color:var(--mut)}.fc-member-row select{width:47%;min-width:128px;padding:7px;font-size:12px}.fc-sync-panel code{font-size:10px;overflow-wrap:anywhere}.fc-sync-panel #fcProfileSelect{width:100%}.fc-sync-panel #fcCopyUid{font-size:11px;min-height:30px;padding:4px 8px}.fc-follow-row{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700}.fc-follow-row input{width:18px;min-height:18px;height:18px}.fc-live-banner{width:calc(100% - 24px);margin:0 12px 8px;text-align:left;background:rgba(22,139,88,.12);border-color:rgba(22,139,88,.35);color:var(--fg);font-size:13px;font-weight:850;display:flex;align-items:center;gap:8px}.fc-live-banner span:nth-child(2){flex:1}.fc-live-dot{width:9px;height:9px;border-radius:100%;background:#16a36a;display:inline-block}.fc-role-bar{padding:8px 12px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:var(--bg)}.fc-role-line{display:flex;align-items:center;justify-content:space-between;gap:7px;width:100%;font-size:12px}.fc-role-line button{font-size:12px;min-height:36px;padding:6px 9px}.fc-role-bar select{min-height:38px;font-size:13px}.fc-next-only{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px 18px;gap:12px;overflow:auto}.fc-next-chip{padding:6px 12px;border-radius:20px;background:var(--acc);color:var(--accfg);font-weight:900;font-size:12px}.fc-next-caption{font-size:11px;color:var(--mut);font-weight:900;letter-spacing:.12em}.fc-next-current{font-size:clamp(25px,6vw,38px);font-weight:900;line-height:1.1}.fc-next-title{font-size:clamp(28px,8vw,48px);font-weight:950;color:var(--acc);line-height:1.08}.fc-next-key{font-size:14px;color:var(--mut);font-weight:800}.fc-event-selected-row{display:block}.fc-event-song-head{display:flex;align-items:center;gap:7px}.fc-assignment-controls{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:7px 3px 2px 29px}.fc-assignment-controls label{font-size:10px;color:var(--mut);font-weight:800}.fc-assignment-controls select{display:block;min-height:35px;font-size:12px;padding:5px;margin-top:3px}.fc-live-song{background:rgba(22,139,88,.09);border-radius:10px;padding-left:8px;padding-right:8px}.fc-play-song{font-size:12px;padding:7px 9px;min-height:36px}' +
-      '.fc-member-device{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 8px 8px 28px;font-size:11px;color:var(--mut)}.fc-member-device button{min-height:30px;padding:4px 8px;font-size:11px}.fc-pair-box{border:1px solid var(--line);border-radius:13px;padding:12px;background:var(--bg);display:flex;flex-direction:column;gap:9px}.fc-pair-title{font-size:16px;font-weight:900}.fc-pair-qr{display:flex;justify-content:center;align-items:center;background:#fff;border-radius:10px;padding:12px;min-height:230px}.fc-pair-qr img{max-width:100%;height:auto}.fc-pair-url{font-size:10px;color:var(--mut);overflow-wrap:anywhere;user-select:text}.fc-pair-box button{width:100%}' +
+      '.fc-member-device{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 8px 8px 28px;font-size:11px;color:var(--mut)}.fc-member-device button{min-height:30px;padding:4px 8px;font-size:11px}.fc-pair-actions{border:1px solid var(--line);border-radius:13px;padding:12px;background:var(--bg);display:flex;flex-direction:column;gap:9px}.fc-pair-actions p{margin:0}.fc-pair-actions button{width:100%;min-height:44px}.fc-pair-box{border:1px solid var(--line);border-radius:13px;padding:12px;background:var(--bg);display:flex;flex-direction:column;gap:9px}.fc-pair-title{font-size:16px;font-weight:900}.fc-pair-qr{display:flex;justify-content:center;align-items:center;background:#fff;border-radius:10px;padding:12px;min-height:230px}.fc-pair-qr img{max-width:100%;height:auto}.fc-pair-url{font-size:10px;color:var(--mut);overflow-wrap:anywhere;user-select:text}.fc-pair-box button{width:100%}' +
       '.fc-live-row-current{outline:1px solid color-mix(in srgb,var(--acc) 25%,transparent);outline-offset:3px;border-radius:7px}.fc-profile-gate{position:fixed;inset:0;z-index:2000;display:grid;place-items:center;padding:18px;background:rgba(7,14,25,.78);backdrop-filter:blur(7px)}.fc-profile-card{width:min(100%,480px);max-height:90dvh;overflow:auto;background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:22px;padding:20px;box-shadow:0 18px 60px rgba(0,0,0,.3);display:flex;flex-direction:column;gap:12px}.fc-profile-brand{width:48px;height:48px;border-radius:15px;display:grid;place-items:center;background:var(--acc);color:var(--accfg);font-size:28px}.fc-profile-title{font-size:24px}.fc-profile-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.fc-profile-grid button{min-height:76px;text-align:left;display:flex;flex-direction:column;gap:4px;padding:11px}.fc-profile-grid button b{font-size:14px}.fc-profile-grid button small{color:var(--mut);font-size:11px}.fc-profile-foot{margin:0}.fc-mini-player{position:fixed;left:10px;right:10px;bottom:calc(8px + env(safe-area-inset-bottom));z-index:1100;display:flex;flex-direction:column;gap:5px;padding:9px 11px 7px;border:1px solid color-mix(in srgb,var(--acc) 38%,var(--line));border-radius:14px;background:color-mix(in srgb,var(--card) 94%,transparent);color:var(--fg);box-shadow:0 8px 26px rgba(0,0,0,.18);backdrop-filter:blur(12px)}body.fc-reader-open .fc-mini-player{bottom:calc(98px + env(safe-area-inset-bottom))}.fc-mini-top{display:flex;align-items:center;gap:6px;font-size:10px;font-weight:900;letter-spacing:.06em;color:var(--mut);min-width:0}.fc-mini-live-dot{width:8px;height:8px;border-radius:50%;background:#18a66a;flex:0 0 auto}.fc-mini-player.is-paused .fc-mini-live-dot{background:#d49b2e}.fc-mini-event{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;font-weight:700;letter-spacing:0}.fc-mini-state{white-space:nowrap}.fc-mini-main{display:flex;align-items:center;gap:9px;min-width:0}.fc-mini-copy{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}.fc-mini-copy strong{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.fc-mini-copy span{font-size:11px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.fc-mini-main button{min-height:35px;padding:6px 9px;font-size:11px;font-weight:850;white-space:nowrap}.fc-mini-player.is-free{border-color:color-mix(in srgb,#d49b2e 55%,var(--line))}.fc-mini-progress-track{height:3px;background:var(--line);border-radius:99px;overflow:hidden}.fc-mini-progress-track span{height:100%;display:block;width:0;background:var(--acc);transition:width .2s}.fc-mini-progress-text{position:absolute;right:11px;top:8px;font-size:9px;color:var(--mut);display:none}#list{padding-bottom:100px}.event-list{padding-bottom:100px}';
     var style = document.createElement('style'); style.textContent = css; document.head.appendChild(style);
   }
