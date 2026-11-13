@@ -1,4 +1,4 @@
-const CACHE_NAME = 'frecuencia-cero-shell-v5-roles-sync';
+const CACHE_NAME = 'frecuencia-cero-shell-v9-import-roles';
 const APP_FILES = [
   './',
   './index.html',

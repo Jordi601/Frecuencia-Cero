@@ -6,6 +6,18 @@
 
   var CFG_KEY = 'fc_firebase_config_v1';
   var BAND_KEY = 'fc_band_id_v1';
+  var PROFILE_KEY = 'fc_device_profile_v1';
+  var FIXED_BAND_ID = 'frecuencia-cero-main';
+  var FIREBASE_CONFIG = {
+    apiKey: 'AIzaSyBqpgzZ-z7hBzY3E1SlnL4YaCMaKqI7qD8',
+    authDomain: 'frecuencia-cerov1.firebaseapp.com',
+    databaseURL: 'https://frecuencia-cerov1-default-rtdb.firebaseio.com',
+    projectId: 'frecuencia-cerov1',
+    storageBucket: 'frecuencia-cerov1.firebasestorage.app',
+    messagingSenderId: '91517551899',
+    appId: '1:91517551899:web:f45125cdc86e0dfdb17fbe',
+    measurementId: 'G-STPBJMMPKZ'
+  };
   var FOLLOW_KEY = 'fc_follow_director_v1';
   var OVERRIDE_KEY = 'fc_instrument_overrides_v1';
   var ROLE_LABELS = {
@@ -33,7 +45,7 @@
   var lastCatalogJson = '';
   var lastEventsJson = '';
   var currentUser = null;
-  var bandId = localStorage.getItem(BAND_KEY) || '';
+  var bandId = ''; // Se fija al aprobar el dispositivo en la banda Frecuencia Cero
   var bandMeta = null;
   var memberRole = 'local';
   var memberProfile = null;
@@ -52,6 +64,19 @@
   var originalOpenSong = window.openSong;
   var originalShow = window.show;
   var eventDraftAssignments = {};
+  var selectedProfileRole = localStorage.getItem(PROFILE_KEY) || '';
+  var joinRequestList = {};
+  var watchingIdentity = false;
+  var attachedUid = '';
+  var anonymousSignInPending = false;
+  var identityKind = 'members';
+  var deviceList = {};
+  var identityChecks = { member: false, device: false };
+  var pairQrRef = null;
+  var pairQrToken = '';
+  var pairQrExpiryTimer = null;
+  var pairScanner = null;
+  var pairProcessing = false;
 
   function $(id) { return document.getElementById(id); }
   function safeJson(value) { try { return JSON.stringify(value); } catch (e) { return '{}'; } }
@@ -68,6 +93,9 @@
   function setText(id, value) { var node = $(id); if (node) node.textContent = value; }
   function isConnected() { return !!(db && auth && currentUser && bandId); }
   function isDirector() { return isConnected() ? memberRole === 'voice1' : !currentUser; }
+  function isTechnicalOwner() { if (!currentUser || !memberProfile) return false; var ownerUid = bandMeta && bandMeta.ownerUid; var memberUid = memberProfile.memberUid || currentUser.uid; return !!(memberProfile.isOwner || memberRole === 'accordionist' || (ownerUid && memberUid === ownerUid)); }
+  function canManageCatalog() { return !isConnected() || isTechnicalOwner(); }
+  function canManageEvents() { return !isConnected() || isTechnicalOwner() || memberRole === 'voice1'; }
   function roleName(role) { return ROLE_LABELS[role] || 'Integrante'; }
   function randomCode() {
     var chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -96,74 +124,71 @@
   function bandPath(child) { return 'bands/' + bandId + '/' + child; }
   function updateSyncButtons() {
     var signed = !!currentUser;
-    if ($('fcSignIn')) $('fcSignIn').style.display = signed ? 'none' : '';
-    if ($('fcSignOut')) $('fcSignOut').style.display = signed ? '' : 'none';
-    if ($('fcCreateBand')) $('fcCreateBand').disabled = !signed || !!bandId;
-    if ($('fcJoinBand')) $('fcJoinBand').disabled = !signed || !!bandId;
-    if ($('fcInviteWrap')) $('fcInviteWrap').style.display = memberRole === 'voice1' && bandId ? '' : 'none';
-    if ($('fcMemberAdmin')) $('fcMemberAdmin').style.display = memberRole === 'voice1' && bandId ? '' : 'none';
-    if ($('fcBandActions')) $('fcBandActions').style.display = bandId ? '' : 'none';
-    if ($('fcBandName')) $('fcBandName').value = bandMeta && bandMeta.name ? bandMeta.name : ($('fcBandName') ? $('fcBandName').value : '');
-    if ($('fcBandSummary')) $('fcBandSummary').textContent = bandId ? ((bandMeta && bandMeta.name) || 'Banda conectada') + ' · ' + roleName(memberRole) : 'Aún no estás unido a una banda.';
+    var connected = isConnected();
+    if ($('fcSignIn')) $('fcSignIn').style.display = 'none';
+    if ($('fcSignOut')) $('fcSignOut').style.display = 'none';
+    if ($('fcFirebaseConfig')) $('fcFirebaseConfig').style.display = 'none';
+    if ($('fcConnect')) $('fcConnect').style.display = 'none';
+    if ($('fcInviteWrap')) $('fcInviteWrap').style.display = 'none';
+    if ($('fcJoinCode')) $('fcJoinCode').style.display = 'none';
+    if ($('fcJoinBand')) $('fcJoinBand').style.display = 'none';
+    if ($('fcProfileSelect')) {
+      $('fcProfileSelect').disabled = connected;
+      if (connected) $('fcProfileSelect').value = memberRole;
+      else if (selectedProfileRole) $('fcProfileSelect').value = selectedProfileRole;
+    }
+    if ($('fcProfileSave')) $('fcProfileSave').style.display = connected ? 'none' : '';
+    if ($('fcDeviceUid')) $('fcDeviceUid').textContent = currentUser ? currentUser.uid : 'Preparando identidad de este teléfono…';
+    if ($('fcCopyUid')) $('fcCopyUid').style.display = currentUser && !connected ? '' : 'none';
+    if ($('fcCreateBand')) $('fcCreateBand').style.display = (!connected && selectedProfileRole === 'accordionist') ? '' : 'none';
+    if ($('fcCreateBand')) $('fcCreateBand').disabled = !signed || connected;
+    if ($('fcRequestJoin')) $('fcRequestJoin').style.display = (!connected && selectedProfileRole && selectedProfileRole !== 'accordionist') ? '' : 'none';
+    if ($('fcRequestJoin')) $('fcRequestJoin').disabled = !signed || !!(window.fcJoinRequestPending);
+    if ($('fcLinkDevice')) $('fcLinkDevice').style.display = connected ? '' : 'none';
+    if ($('fcScanDeviceLink')) $('fcScanDeviceLink').style.display = (!connected && signed) ? '' : 'none';
+    if ($('fcBandName')) $('fcBandName').style.display = (!connected && selectedProfileRole === 'accordionist') ? '' : 'none';
+    if ($('fcBandSummary')) $('fcBandSummary').textContent = connected ? ((bandMeta && bandMeta.name) || 'Frecuencia Cero') + ' · ' + roleName(memberRole) : (window.fcJoinRequestPending ? 'Solicitud enviada. Esperando aprobación del propietario técnico.' : 'Selecciona tu perfil en este teléfono.');
+    if ($('fcBandActions')) $('fcBandActions').style.display = connected ? '' : 'none';
+    if ($('fcMemberAdmin')) $('fcMemberAdmin').style.display = connected && isTechnicalOwner() ? '' : 'none';
+    if ($('fcMyDevicesBox')) $('fcMyDevicesBox').style.display = connected ? '' : 'none';
+    if ($('fcJoinRequests')) $('fcJoinRequests').style.display = connected && isTechnicalOwner() ? '' : 'none';
     if ($('fcFollow')) $('fcFollow').checked = followDirector;
     var profileBar = $('fcRoleBar');
-    if (profileBar) profileBar.style.display = (currentUser && memberRole !== 'pending') ? '' : 'none';
+    if (profileBar) profileBar.style.display = (connected && memberRole !== 'pending') ? '' : 'none';
     if ($('fcDirectorButton')) $('fcDirectorButton').style.display = memberRole === 'voice1' ? '' : 'none';
-    if ($('eventNew')) $('eventNew').style.display = isConnected() && memberRole !== 'voice1' ? 'none' : '';
-    var legacyImport = document.querySelector('.event-import'); if (legacyImport) legacyImport.style.display = isConnected() ? 'none' : '';
-    if ($('playlistEdit')) $('playlistEdit').style.display = isConnected() && memberRole !== 'voice1' ? 'none' : '';
-    if ($('bnew')) $('bnew').style.display = isConnected() && memberRole !== 'voice1' ? 'none' : '';
-    if ($('bedit')) $('bedit').style.display = isConnected() && memberRole !== 'voice1' ? 'none' : '';
-    if ($('tmode') && isConnected()) $('tmode').style.display = 'none';
+    if ($('eventNew')) $('eventNew').style.display = connected && !canManageEvents() ? 'none' : '';
+    var legacyImport = document.querySelector('.event-import'); if (legacyImport) legacyImport.style.display = connected ? 'none' : '';
+    if ($('mimp')) $('mimp').style.display = connected && !canManageCatalog() ? 'none' : '';
+    if ($('mimp') && connected && !canManageCatalog()) $('mmsg').textContent = 'La importación y edición del catálogo están reservadas al propietario técnico.';
+    if ($('playlistEdit')) $('playlistEdit').style.display = connected && !canManageEvents() ? 'none' : '';
+    if ($('bnew')) $('bnew').style.display = connected && !canManageCatalog() ? 'none' : '';
+    if ($('bedit')) $('bedit').style.display = connected && !canManageCatalog() ? 'none' : '';
+    if ($('tmode') && connected) $('tmode').style.display = 'none';
     renderMemberAdmin();
+    renderMyDevices();
+    renderJoinRequests();
   }
-  function configFromInput() {
-    var raw = $('fcFirebaseConfig') ? $('fcFirebaseConfig').value.trim() : '';
-    if (!raw) raw = localStorage.getItem(CFG_KEY) || '';
-    if (!raw) throw new Error('Pega primero la configuración web de Firebase.');
-    raw = raw.replace(/^const\s+firebaseConfig\s*=\s*/, '').replace(/^var\s+firebaseConfig\s*=\s*/, '').replace(/^let\s+firebaseConfig\s*=\s*/, '').replace(/;\s*$/, '');
-    var cfg;
-    try { cfg = JSON.parse(raw); }
-    catch (parseError) {
-      // Acepta también el objeto JavaScript copiado desde Firebase Console (claves sin comillas).
-      cfg = {};
-      var fields = ['apiKey','authDomain','databaseURL','projectId','storageBucket','messagingSenderId','appId','measurementId'];
-      fields.forEach(function (key) {
-        var escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        var match = raw.match(new RegExp('(?:[\"\']?' + escaped + '[\"\']?)\\s*:\\s*[\"\']([^\"\']*)[\"\']'));
-        if (match) cfg[key] = match[1];
-      });
-    }
-    ['apiKey', 'authDomain', 'databaseURL', 'projectId', 'appId'].forEach(function (key) {
-      if (!cfg[key]) throw new Error('La configuración no incluye ' + key + '.');
-    });
-    return cfg;
-  }
+  function configFromInput() { return FIREBASE_CONFIG; }
   function connectFirebase() {
     try {
-      if (!window.firebase || !firebase.initializeApp) throw new Error('No se pudo cargar Firebase. Comprueba tu conexión a Internet y vuelve a abrir la página.');
-      var cfg = configFromInput();
-      localStorage.setItem(CFG_KEY, JSON.stringify(cfg));
-      if ($('fcFirebaseConfig')) $('fcFirebaseConfig').value = JSON.stringify(cfg, null, 2);
-      firebaseApp = firebase.apps.length ? firebase.app() : firebase.initializeApp(cfg);
+      if (!window.firebase || !firebase.initializeApp) throw new Error('No se pudo cargar Firebase. Comprueba tu conexión a Internet.');
+      firebaseApp = firebase.apps.length ? firebase.app() : firebase.initializeApp(FIREBASE_CONFIG);
       auth = firebase.auth();
       db = firebase.database();
-      setStatus('Firebase conectado. Inicia sesión con Google.', 'success');
+      setStatus('Conectando de forma segura este teléfono…', 'success');
       auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(function () {});
       if (!authWatcherStarted) { auth.onAuthStateChanged(onAuthChanged); authWatcherStarted = true; }
-      auth.getRedirectResult().catch(function (err) { if (err && err.code) setStatus('No se completó el acceso: ' + err.message, 'error'); });
+      if (!auth.currentUser && !anonymousSignInPending) {
+        anonymousSignInPending = true;
+        auth.signInAnonymously().catch(function (err) {
+          anonymousSignInPending = false;
+          setStatus('No se pudo identificar este teléfono: ' + err.message, 'error');
+        });
+      }
       updateSyncButtons();
-    } catch (err) {
-      setStatus(err.message || 'No se pudo conectar Firebase.', 'error');
-    }
+    } catch (err) { setStatus(err.message || 'No se pudo conectar Firebase.', 'error'); }
   }
-  function signIn() {
-    if (!auth) { connectFirebase(); if (!auth) return; }
-    var provider = new firebase.auth.GoogleAuthProvider();
-    provider.setCustomParameters({ prompt: 'select_account' });
-    // El redireccionamiento funciona mejor en Safari/iPhone como PWA que una ventana emergente.
-    auth.signInWithRedirect(provider).catch(function (err) { setStatus('Error al iniciar sesión: ' + err.message, 'error'); });
-  }
+  function signIn() { connectFirebase(); }
   function signOut() {
     if (!auth) return;
     if (!confirm('¿Cerrar sesión de Frecuencia Cero en este teléfono?')) return;
@@ -174,88 +199,159 @@
   }
   function onAuthChanged(user) {
     currentUser = user || null;
+    anonymousSignInPending = false;
     if (!user) {
-      memberRole = 'local'; memberProfile = null;
-      setStatus(db ? 'Firebase listo. Inicia sesión con Google.' : 'Sincronización sin configurar; la aplicación sigue funcionando localmente.', 'neutral');
-      updateSyncButtons(); return;
+      memberRole = 'unjoined'; memberProfile = null;
+      setStatus('Identificando este teléfono…', 'neutral');
+      updateSyncButtons();
+      if (auth && !anonymousSignInPending) {
+        anonymousSignInPending = true;
+        auth.signInAnonymously().catch(function (err) { anonymousSignInPending = false; setStatus('No se pudo crear la identidad temporal: ' + err.message, 'error'); });
+      }
+      return;
     }
-    setStatus('Sesión iniciada como ' + (user.displayName || user.email || 'integrante') + '.', 'success');
-    if (bandId) attachBand(bandId);
-    else { memberRole = 'unjoined'; updateSyncButtons(); setText('fcJoinHint', 'Ahora crea la banda o únete una sola vez con el código de invitación.'); }
+    setStatus('Teléfono identificado. Selecciona tu perfil o vincula este dispositivo.', 'success');
+    setText('fcDeviceUid', user.uid);
+    watchOwnMembership();
+    maybeProcessIncomingPair();
+    updateSyncButtons();
+  }
+  function activateMembership(profile, kind) {
+    if (!profile || !profile.role || !currentUser) return;
+    var id = currentUser.uid + ':' + kind;
+    bandId = FIXED_BAND_ID; localStorage.setItem(BAND_KEY, bandId);
+    identityKind = kind;
+    memberRole = profile.role; memberProfile = profile;
+    selectedProfileRole = profile.role; localStorage.setItem(PROFILE_KEY, profile.role);
+    window.fcJoinRequestPending = false;
+    if (attachedUid !== id) attachBand(FIXED_BAND_ID, kind);
+    setStatus('Conectado · ' + roleName(memberRole) + (kind === 'devices' ? ' · dispositivo vinculado' : ''), 'success');
+    updateSyncButtons();
+  }
+  function watchOwnMembership() {
+    if (!db || !currentUser || watchingIdentity) return;
+    watchingIdentity = true;
+    var uid = currentUser.uid;
+    refs.selfMember = db.ref('bands/' + FIXED_BAND_ID + '/members/' + uid);
+    refs.selfDevice = db.ref('bands/' + FIXED_BAND_ID + '/devices/' + uid);
+    refs.selfRequest = db.ref('bands/' + FIXED_BAND_ID + '/joinRequests/' + uid);
+    identityChecks = { member: false, device: false };
+    refs.selfMember.on('value', function (snap) {
+      identityChecks.member = true;
+      var m = snap.val();
+      if (m && m.role) activateMembership(m, 'members');
+      else if (identityChecks.device && !memberProfile) finishUnjoinedIdentity();
+    }, function (err) {
+      identityChecks.member = true;
+      if (err && err.code !== 'PERMISSION_DENIED') setStatus('No se pudo consultar el perfil: ' + err.message, 'error');
+      if (identityChecks.device && !memberProfile) finishUnjoinedIdentity();
+    });
+    refs.selfDevice.on('value', function (snap) {
+      identityChecks.device = true;
+      var d = snap.val();
+      if (d && d.role && !memberProfile) activateMembership(d, 'devices');
+      else if (identityChecks.member && !memberProfile) finishUnjoinedIdentity();
+    }, function (err) {
+      identityChecks.device = true;
+      if (err && err.code !== 'PERMISSION_DENIED') setStatus('No se pudo consultar el dispositivo vinculado: ' + err.message, 'error');
+      if (identityChecks.member && !memberProfile) finishUnjoinedIdentity();
+    });
+    refs.selfRequest.on('value', function (snap) {
+      var req = snap.val();
+      window.fcJoinRequestPending = !!req;
+      if (req) setStatus('Solicitud enviada como ' + roleName(req.requestedRole) + '. Esperando aprobación del propietario técnico.', 'warning');
+      else if (!bandId && currentUser && !memberProfile) setStatus('Selecciona tu perfil o escanea un QR de vinculación.', 'neutral');
+      updateSyncButtons();
+    }, function (err) {
+      if (err && err.code !== 'PERMISSION_DENIED') setStatus('No se pudo consultar la solicitud: ' + err.message, 'error');
+    });
+  }
+  function finishUnjoinedIdentity() {
+    if (bandId || memberProfile) return;
+    memberRole = window.fcJoinRequestPending ? 'pending' : 'unjoined';
+    identityKind = 'members';
+    updateSyncButtons();
   }
   async function createBand() {
     try {
-      if (!currentUser || !db) throw new Error('Conecta Firebase e inicia sesión primero.');
-      if (bandId) throw new Error('Este teléfono ya está asociado a una banda. Cierra sesión o desconecta la banda antes de crear otra.');
+      if (!currentUser || !db) throw new Error('El teléfono todavía no está identificado.');
+      if (selectedProfileRole !== 'accordionist') throw new Error('Selecciona Acordeonista para crear la banda como propietario técnico.');
+      if (bandId) throw new Error('Este teléfono ya pertenece a la banda.');
       var name = $('fcBandName').value.trim() || 'Frecuencia Cero';
-      var id = db.ref('bands').push().key;
       var now = firebase.database.ServerValue.TIMESTAMP;
       var initialEvents = {};
       (window.events || []).forEach(function (ev) { initialEvents[ev.id] = Object.assign({}, ev, { assignments: ev.assignments || {} }); });
       var initial = {
-        meta: { name: name, ownerUid: currentUser.uid, createdAt: now, schema: 1 },
-        members: {},
-        catalog: mapById(window.songs || []),
-        events: initialEvents,
-        live: { eventId: null, songId: null, changedAt: now, changedBy: currentUser.uid }
+        meta: { name: name, ownerUid: currentUser.uid, createdAt: now, schema: 3, authMode: 'anonymous', ownerRole: 'accordionist', directorRole: 'voice1' },
+        members: {}, devices: {}, devicePairings: {},
+        catalog: mapById(window.songs || []), events: initialEvents,
+        live: { eventId: null, songId: null, position: -1, changedAt: now, changedBy: currentUser.uid }
       };
-      initial.members[currentUser.uid] = { role: 'voice1', name: currentUser.displayName || 'Voz 1', email: currentUser.email || '', joinedAt: now };
-      await db.ref('bands/' + id).set(initial);
-      bandId = id; localStorage.setItem(BAND_KEY, bandId);
-      memberRole = 'voice1'; memberProfile = initial.members[currentUser.uid]; bandMeta = initial.meta;
-      lastCatalogJson = safeJson(mapById(window.songs || []));
-      lastEventsJson = safeJson(mapById(window.events || []));
-      await createInviteCode();
-      await attachBand(id);
-      setStatus('Banda creada. Tú eres Voz 1 · Director.', 'success');
-    } catch (err) { setStatus('No se pudo crear la banda: ' + err.message, 'error'); }
+      initial.members[currentUser.uid] = { role: 'accordionist', name: ROLE_LABELS.accordionist, memberUid: currentUser.uid, isOwner: true, joinedAt: now, deviceType: 'anonymous' };
+      await db.ref('bands/' + FIXED_BAND_ID).set(initial);
+      bandId = FIXED_BAND_ID; localStorage.setItem(BAND_KEY, bandId);
+      memberRole = 'accordionist'; memberProfile = initial.members[currentUser.uid]; bandMeta = initial.meta;
+      selectedProfileRole = 'accordionist'; localStorage.setItem(PROFILE_KEY, 'accordionist');
+      lastCatalogJson = safeJson(mapById(window.songs || [])); lastEventsJson = safeJson(mapById(window.events || []));
+      attachedUid = ''; identityKind = 'members';
+      await attachBand(FIXED_BAND_ID, 'members');
+      setStatus('Banda creada. Este teléfono es el propietario técnico y conserva el perfil Acordeonista. Voz 1 se incorporará como director musical.', 'success');
+    } catch (err) {
+      var detail = err && err.code === 'PERMISSION_DENIED' ? 'Firebase rechazó la creación. Publica las reglas con el UID autorizado del propietario técnico (perfil Acordeonista).' : (err.message || 'Error desconocido.');
+      setStatus('No se pudo crear la banda: ' + detail, 'error');
+    }
   }
-  async function createInviteCode() {
-    if (!db || !bandId || memberRole !== 'voice1') return;
+  async function requestJoin() {
     try {
-      if (!inviteCode) inviteCode = localStorage.getItem(inviteStorageKey()) || '';
-      if (inviteCode) await db.ref('bandInvites/' + inviteCode).update({ active: false });
-      inviteCode = randomCode();
-      localStorage.setItem(inviteStorageKey(), inviteCode);
-      await db.ref('bandInvites/' + inviteCode).set({ bandId: bandId, active: true, createdBy: currentUser.uid, createdAt: firebase.database.ServerValue.TIMESTAMP });
-      if ($('fcInviteCode')) $('fcInviteCode').value = inviteCode;
-      setText('fcInviteMsg', 'Comparte esta invitación con los otros cinco integrantes. Cada uno la utiliza una sola vez; después todos los eventos aparecerán automáticamente.');
-    } catch (err) { setStatus('No se pudo crear el código de invitación: ' + err.message, 'error'); }
+      if (!currentUser || !db) throw new Error('Espera a que Firebase identifique este teléfono.');
+      var role = selectedProfileRole || ($('fcProfileSelect') && $('fcProfileSelect').value);
+      if (!role || role === 'accordionist' || !ROLE_OPTIONS.some(function (r) { return r[0] === role; })) throw new Error('La función Acordeonista está reservada al propietario técnico. Selecciona otra función disponible.');
+      if (bandId) throw new Error('Este teléfono ya pertenece a la banda.');
+      var reqRef = db.ref('bands/' + FIXED_BAND_ID + '/joinRequests/' + currentUser.uid);
+      var existing = await reqRef.once('value');
+      if (existing.exists()) { window.fcJoinRequestPending = true; setStatus('Ya existe una solicitud pendiente. El propietario técnico debe aprobarla.', 'warning'); updateSyncButtons(); return; }
+      await reqRef.set({ requestedRole: role, deviceName: ROLE_LABELS[role], requestedAt: firebase.database.ServerValue.TIMESTAMP, status: 'pending' });
+      selectedProfileRole = role; localStorage.setItem(PROFILE_KEY, role);
+      window.fcJoinRequestPending = true;
+      setStatus('Solicitud enviada. El propietario técnico aprobará tu función desde Mi banda y sincronización.', 'success');
+      updateSyncButtons();
+    } catch (err) {
+      var msg = err && err.code === 'PERMISSION_DENIED' ? 'No se pudo enviar la solicitud. Primero el propietario técnico debe crear la banda y publicar las reglas correctas.' : (err.message || 'Error desconocido.');
+      setStatus('No se pudo solicitar acceso: ' + msg, 'error');
+    }
   }
-  async function joinBand() {
+  async function approveJoinRequest(uid, role) {
+    if (!isTechnicalOwner() || !db || !bandId) return;
+    if (!ROLE_OPTIONS.some(function (r) { return r[0] === role && role !== 'accordionist' && role !== 'pending'; })) return;
+    var occupied = Object.keys(memberList || {}).find(function (otherUid) { return otherUid !== uid && memberList[otherUid] && memberList[otherUid].role === role; });
+    if (occupied) { alert('La función ' + roleName(role) + ' ya está ocupada. Selecciona otra función disponible.'); return; }
+    if (Object.keys(memberList || {}).length >= 6 && !memberList[uid]) { alert('La banda ya tiene sus seis integrantes.'); return; }
+    var req = joinRequestList[uid] || {};
+    var member = { role: role, name: ROLE_LABELS[role], memberUid: uid, joinedAt: firebase.database.ServerValue.TIMESTAMP, approvedBy: currentUser.uid };
+    var patch = {};
+    patch['members/' + uid] = member;
+    patch['joinRequests/' + uid] = null;
     try {
-      if (!currentUser || !db) throw new Error('Conecta Firebase e inicia sesión primero.');
-      if (bandId) throw new Error('Este teléfono ya está asociado a una banda.');
-      var code = ($('fcJoinCode').value || '').trim().toUpperCase();
-      if (!code) throw new Error('Escribe el código de invitación de la banda.');
-      var inviteSnap = await db.ref('bandInvites/' + code).once('value');
-      var invite = inviteSnap.val();
-      if (!invite || !invite.active || !invite.bandId) throw new Error('El código no existe o fue desactivado. Pide uno nuevo al director.');
-      // No se consulta la lista antes de unirse: las reglas de Firebase permiten
-      // la lectura de miembros solo a quienes ya pertenecen a la banda. El limite
-      // de seis integrantes se valida de forma segura en las reglas de escritura.
-      var member = { role: 'pending', name: currentUser.displayName || currentUser.email || 'Integrante', email: currentUser.email || '', joinedAt: firebase.database.ServerValue.TIMESTAMP, inviteCode: code };
-      try { await db.ref('bands/' + invite.bandId + '/members/' + currentUser.uid).set(member); }
-      catch (joinError) {
-        if (joinError && joinError.code === 'PERMISSION_DENIED') {
-          throw new Error('No se pudo incorporar la cuenta. Comprueba que la invitacion siga activa y que las reglas de Firebase esten publicadas.');
-        }
-        throw joinError;
-      }
-      bandId = invite.bandId; localStorage.setItem(BAND_KEY, bandId);
-      await attachBand(bandId);
-      $('fcJoinCode').value = '';
-      setStatus('Solicitud registrada. El director debe asignarte un instrumento.', 'success');
-    } catch (err) { setStatus('No se pudo unir a la banda: ' + err.message, 'error'); }
+      await db.ref(memberPath() + '/' + uid).set(member);
+      await db.ref(bandPath('joinRequests/' + uid)).remove();
+      setStatus((req.deviceName || 'Integrante') + ' aprobado como ' + roleName(role) + '.', 'success');
+    } catch (err) { setStatus('No se pudo aprobar al integrante: ' + err.message, 'error'); }
   }
-  async function attachBand(id) {
+  async function rejectJoinRequest(uid) {
+    if (!isTechnicalOwner() || !db || !bandId) return;
+    try { await db.ref(bandPath('joinRequests/' + uid)).remove(); }
+    catch (err) { setStatus('No se pudo rechazar la solicitud: ' + err.message, 'error'); }
+  }
+  async function attachBand(id, kind) {
     if (!db || !currentUser) return;
+    kind = kind || 'members';
+    if (attachedUid === currentUser.uid + ':' + kind && bandId === id && refs.catalog) return;
     Object.keys(refs).forEach(function (key) { try { refs[key].off(); } catch (e) {} }); refs = {};
-    bandId = id; localStorage.setItem(BAND_KEY, id);
+    bandId = id; localStorage.setItem(BAND_KEY, id); identityKind = kind; attachedUid = currentUser.uid + ':' + kind;
     var root = db.ref('bands/' + id);
     refs.meta = root.child('meta');
     refs.members = root.child('members');
-    refs.mine = root.child('members/' + currentUser.uid);
+    refs.mine = root.child(kind + '/' + currentUser.uid);
     refs.catalog = root.child('catalog');
     refs.events = root.child('events');
     refs.live = root.child('live');
@@ -263,16 +359,22 @@
     refs.meta.on('value', function (snap) { bandMeta = snap.val() || {}; updateSyncButtons(); });
     refs.mine.on('value', function (snap) {
       memberProfile = snap.val(); memberRole = memberProfile && memberProfile.role || 'pending';
-      if (memberRole === 'voice1') { inviteCode = localStorage.getItem(inviteStorageKey()) || ''; if ($('fcInviteCode') && inviteCode) $('fcInviteCode').value = inviteCode; }
-      setStatus(memberRole === 'pending' ? 'Estás dentro de la banda, esperando que Voz 1 te asigne tu función.' : 'Conectado · ' + roleName(memberRole), memberRole === 'pending' ? 'warning' : 'success');
+      selectedProfileRole = memberRole; localStorage.setItem(PROFILE_KEY, memberRole);
+      setStatus('Conectado · ' + roleName(memberRole), 'success');
       updateSyncButtons(); if (window.cur) applyRoleToCurrentSong();
     });
-    refs.members.on('value', function (snap) { memberList = snap.val() || {}; Object.keys(memberList).forEach(function (uid) { memberList[uid].online = !!(presenceMap[uid] && presenceMap[uid].online); }); renderMemberAdmin(); });
+    refs.members.on('value', function (snap) { memberList = snap.val() || {}; updateMemberPresence(); renderMemberAdmin(); renderMyDevices(); renderMembersStatus(); });
+    refs.devices = root.child('devices');
+    refs.devices.on('value', function (snap) { deviceList = snap.val() || {}; updateMemberPresence(); renderMemberAdmin(); renderMyDevices(); renderMembersStatus(); });
+    if (isTechnicalOwner()) {
+      refs.joinRequests = root.child('joinRequests');
+      refs.joinRequests.on('value', function (snap) { joinRequestList = snap.val() || {}; renderJoinRequests(); });
+    }
     refs.allPresence = root.child('presence');
     refs.allPresence.on('value', function (snap) {
       presenceMap = snap.val() || {};
-      Object.keys(memberList || {}).forEach(function (uid) { memberList[uid].online = !!(presenceMap[uid] && presenceMap[uid].online); });
-      renderMemberAdmin(); renderMembersStatus();
+      updateMemberPresence();
+      renderMemberAdmin(); renderMyDevices(); renderMembersStatus();
     });
     refs.catalog.on('value', function (snap) {
       var data = snap.val(); if (!data) return;
@@ -294,23 +396,263 @@
       if (window.cur) applyRoleToCurrentSong();
     });
     refs.live.on('value', function (snap) { liveState = snap.val() || null; renderLiveBanner(); handleLiveUpdate(); });
-    refs.presence.set({ name: currentUser.displayName || currentUser.email || 'Integrante', role: memberRole, online: true, since: firebase.database.ServerValue.TIMESTAMP }).catch(function () {});
+    refs.presence.set({ name: roleName(memberRole), role: memberRole, online: true, since: firebase.database.ServerValue.TIMESTAMP }).catch(function () {});
     refs.presence.onDisconnect().remove().catch(function () {});
     updateSyncButtons();
   }
+  function randomTokenHex() {
+    var bytes = new Uint8Array(24);
+    if (!window.crypto || !crypto.getRandomValues) throw new Error('Este navegador no puede generar un QR seguro. Actualiza Safari o Chrome.');
+    crypto.getRandomValues(bytes);
+    return Array.prototype.map.call(bytes, function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+  }
+  function canonicalMemberUid() {
+    if (memberProfile && memberProfile.memberUid) return memberProfile.memberUid;
+    return currentUser ? currentUser.uid : '';
+  }
+  function pairingUrl(token) {
+    var url = new URL('./', window.location.href);
+    url.search = ''; url.hash = ''; url.searchParams.set('fc_pair', token);
+    return url.toString();
+  }
+  function closePairQr(message) {
+    if (pairQrRef) { pairQrRef.off(); pairQrRef = null; }
+    if (pairQrExpiryTimer) { clearTimeout(pairQrExpiryTimer); pairQrExpiryTimer = null; }
+    pairQrToken = '';
+    var box = $('fcPairQrBox'); if (box) { box.style.display = 'none'; box.innerHTML = ''; }
+    if (message) setStatus(message, 'success');
+  }
+  async function createDevicePairing() {
+    try {
+      if (!isConnected() || !memberProfile) throw new Error('Primero debes tener un perfil autorizado en la banda.');
+      var token = randomTokenHex();
+      var memberUid = canonicalMemberUid();
+      var expiresAt = Date.now() + 180000;
+      var pairing = {
+        role: memberRole,
+        memberUid: memberUid,
+        createdBy: currentUser.uid,
+        createdAt: firebase.database.ServerValue.TIMESTAMP,
+        expiresAt: expiresAt,
+        status: 'pending'
+      };
+      var ref = db.ref(bandPath('devicePairings/' + token));
+      await ref.set(pairing);
+      closePairQr();
+      pairQrToken = token; pairQrRef = ref;
+      var box = $('fcPairQrBox');
+      box.innerHTML = '<div class="fc-pair-title">Vincular otro dispositivo</div><p class="note">Abre Frecuencia Cero en el otro teléfono o tablet y pulsa Escanear QR. Este QR vence en 3 minutos y solo sirve una vez.</p><div id="fcPairQrCanvas" class="fc-pair-qr"></div><div id="fcPairUrlText" class="fc-pair-url"></div><div id="fcPairCountdown" class="note">Válido durante 3:00</div><button type="button" id="fcPairCopy">Copiar enlace alternativo</button><button type="button" id="fcPairCancel">Cancelar QR</button>';
+      box.style.display = '';
+      var link = pairingUrl(token);
+      $('fcPairUrlText').textContent = link;
+      if (window.QRCode) {
+        new QRCode($('fcPairQrCanvas'), { text: link, width: 220, height: 220, colorDark: '#111827', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.M });
+      } else {
+        $('fcPairQrCanvas').textContent = 'No se pudo cargar el generador QR. Puedes abrir el enlace en el otro dispositivo.';
+      }
+      $('fcPairCopy').onclick = function () { if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(link).then(function () { setStatus('Enlace alternativo copiado.', 'success'); }).catch(function () { setStatus('No se pudo copiar. Mantén pulsado el enlace para copiarlo.', 'warning'); }); else setStatus('Mantén pulsado el enlace para copiarlo.', 'neutral'); };
+      $('fcPairCancel').onclick = function () { ref.remove().catch(function () {}); closePairQr('Código de vinculación cancelado.'); };
+      ref.on('value', function (snap) {
+        var state = snap.val();
+        if (!state) return;
+        if (state.status === 'completed') { ref.remove().catch(function () {}); closePairQr('¡Dispositivo vinculado correctamente a ' + roleName(state.role) + '!'); }
+        else if (state.status === 'claimed') setText('fcPairCountdown', 'QR escaneado. Terminando vinculación…');
+      });
+      var end = Date.now() + 180000;
+      function tick() {
+        if (!pairQrToken || pairQrToken !== token) return;
+        var remain = Math.max(0, end - Date.now());
+        var total = Math.ceil(remain / 1000);
+        setText('fcPairCountdown', 'Válido durante ' + Math.floor(total / 60) + ':' + String(total % 60).padStart(2, '0'));
+        if (remain <= 0) { ref.remove().catch(function () {}); closePairQr('El QR venció. Genera uno nuevo cuando lo necesites.'); }
+        else pairQrExpiryTimer = setTimeout(tick, 1000);
+      }
+      tick();
+      setStatus('QR generado. Escanéalo desde el dispositivo que quieres vincular.', 'success');
+    } catch (err) { setStatus('No se pudo generar el QR: ' + (err.message || err), 'error'); }
+  }
+  function extractPairToken(text) {
+    try {
+      var u = new URL(text);
+      return u.searchParams.get('fc_pair') || '';
+    } catch (e) {
+      return /^[a-f0-9]{48}$/i.test(String(text || '').trim()) ? String(text).trim() : '';
+    }
+  }
+  async function claimDevicePairing(token) {
+    if (pairProcessing) return;
+    pairProcessing = true;
+    try {
+      if (!currentUser || !db) throw new Error('Este dispositivo todavía no tiene identidad de Firebase.');
+      if (bandId) throw new Error('Este dispositivo ya está vinculado a una función.');
+      var pairRef = db.ref('bands/' + FIXED_BAND_ID + '/devicePairings/' + token);
+      var initial = await pairRef.once('value');
+      var pair = initial.val();
+      if (!pair || pair.status !== 'pending' || Number(pair.expiresAt) <= Date.now()) throw new Error('El QR venció o ya fue utilizado. Genera uno nuevo desde el dispositivo original.');
+      var tx = await pairRef.transaction(function (current) {
+        if (!current || current.status !== 'pending' || Number(current.expiresAt) <= Date.now()) return;
+        current.status = 'claimed';
+        current.claimedBy = currentUser.uid;
+        current.claimedAt = firebase.database.ServerValue.TIMESTAMP;
+        return current;
+      });
+      if (!tx.committed) throw new Error('Este QR ya fue utilizado o venció. Solicita uno nuevo.');
+      pair = tx.snapshot.val();
+      var device = {
+        role: pair.role,
+        name: ROLE_LABELS[pair.role] || 'Integrante',
+        memberUid: pair.memberUid,
+        linkedFrom: pair.createdBy,
+        linkedAt: firebase.database.ServerValue.TIMESTAMP,
+        pairingToken: token
+      };
+      await db.ref('bands/' + FIXED_BAND_ID + '/devices/' + currentUser.uid).set(device);
+      await pairRef.update({ status: 'completed', completedAt: firebase.database.ServerValue.TIMESTAMP });
+      var cleanUrl = new URL(window.location.href); cleanUrl.searchParams.delete('fc_pair');
+      history.replaceState({}, '', cleanUrl.pathname + cleanUrl.search + cleanUrl.hash);
+      setStatus('¡Este dispositivo quedó vinculado como ' + roleName(pair.role) + '!', 'success');
+    } catch (err) {
+      setStatus('No se pudo vincular el dispositivo: ' + (err.message || err), 'error');
+      alert(err.message || 'No se pudo completar la vinculación.');
+    } finally { pairProcessing = false; }
+  }
+  function maybeProcessIncomingPair() {
+    if (!currentUser || !db || pairProcessing) return;
+    var token = '';
+    try { token = new URL(window.location.href).searchParams.get('fc_pair') || ''; } catch (e) {}
+    if (token) claimDevicePairing(token);
+  }
+  async function startPairScanner() {
+    try {
+      if (!currentUser || !db) throw new Error('Espera a que Firebase identifique este dispositivo.');
+      if (bandId) throw new Error('Este dispositivo ya está vinculado.');
+      if (!window.Html5Qrcode) throw new Error('No se pudo cargar el lector QR. Comprueba Internet y vuelve a intentarlo.');
+      var wrap = $('fcPairScannerWrap'); wrap.style.display = '';
+      $('fcPairScannerStatus').textContent = 'Solicitando permiso de cámara…';
+      pairScanner = new Html5Qrcode('fcPairScanner');
+      await pairScanner.start({ facingMode: 'environment' }, { fps: 10, qrbox: { width: 230, height: 230 }, aspectRatio: 1 }, function (decodedText) {
+        var token = extractPairToken(decodedText);
+        if (!token) { $('fcPairScannerStatus').textContent = 'Ese QR no pertenece a una vinculación de Frecuencia Cero.'; return; }
+        stopPairScanner();
+        claimDevicePairing(token);
+      }, function () {});
+      $('fcPairScannerStatus').textContent = 'Apunta la cámara al QR que muestra tu otro dispositivo.';
+    } catch (err) {
+      if ($('fcPairScannerStatus')) $('fcPairScannerStatus').textContent = err.message || 'No se pudo abrir la cámara.';
+      setStatus(err.message || 'No se pudo iniciar el lector QR.', 'error');
+    }
+  }
+  function stopPairScanner() {
+    if (pairScanner) {
+      pairScanner.stop().catch(function () {}).finally(function () { pairScanner.clear().catch(function () {}); pairScanner = null; });
+    }
+    if ($('fcPairScannerWrap')) $('fcPairScannerWrap').style.display = 'none';
+  }
+
+  async function removeMember(uid) {
+    if (!isTechnicalOwner() || !db || !bandId) return;
+    var ownerUid = bandMeta && bandMeta.ownerUid;
+    if (uid === ownerUid) { alert('El propietario técnico no se puede eliminar desde esta pantalla.'); return; }
+    var member = memberList[uid];
+    if (!member) return;
+    if (!confirm('¿Quitar a ' + (member.name || 'este integrante') + ' de Frecuencia Cero? También se revocarán sus dispositivos vinculados.')) return;
+    try {
+      var linked = Object.keys(deviceList || {}).filter(function (deviceUid) { return deviceList[deviceUid] && deviceList[deviceUid].memberUid === uid; });
+      await db.ref(memberPath() + '/' + uid).remove();
+      await Promise.all(linked.map(function (deviceUid) { return db.ref(bandPath('devices/' + deviceUid)).remove(); }));
+      await db.ref(bandPath('joinRequests/' + uid)).remove().catch(function () {});
+      setStatus((member.name || 'Integrante') + ' retirado de la banda. La plaza quedó disponible.', 'success');
+    } catch (err) {
+      setStatus('No se pudo quitar al integrante: ' + (err.message || err), 'error');
+    }
+  }
+
   async function setMemberRole(uid, role) {
-    if (memberRole !== 'voice1' || !db || !bandId) return;
+    if (!isTechnicalOwner() || !db || !bandId) return;
     var allowed = ROLE_OPTIONS.some(function (r) { return r[0] === role; });
     if (!allowed) return;
     var ownerUid = bandMeta && bandMeta.ownerUid;
+    if (uid === ownerUid) { alert('El perfil del propietario técnico no se puede quitar ni reasignar.'); renderMemberAdmin(); return; }
+    if (role === 'accordionist') { alert('La función Acordeonista está reservada al propietario técnico.'); renderMemberAdmin(); return; }
     if (role !== 'pending') {
       var occupied = Object.keys(memberList || {}).find(function (otherUid) { return otherUid !== uid && memberList[otherUid] && memberList[otherUid].role === role; });
       if (occupied) { alert('La función ' + roleName(role) + ' ya está asignada a otro integrante. Cada una de las seis funciones debe tener una sola persona.'); renderMemberAdmin(); return; }
     }
-    if (uid === ownerUid && role !== 'voice1') { alert('La cuenta que creó la banda conserva el rol de Voz 1 · Director.'); renderMemberAdmin(); return; }
-    if (uid !== ownerUid && role === 'voice1') { alert('Voz 1 · Director queda reservado para la cuenta que creó la banda.'); renderMemberAdmin(); return; }
-    try { await db.ref(memberPath() + '/' + uid).update({ role: role }); }
+    try { await db.ref(memberPath() + '/' + uid).update({ role: role, name: roleName(role) }); }
     catch (err) { setStatus('No se pudo cambiar el rol: ' + err.message, 'error'); }
+  }
+  async function revokeDevice(deviceUid) {
+    if (!isConnected() || !db) return;
+    var target = deviceList[deviceUid];
+    if (!target) return;
+    var myMemberUid = canonicalMemberUid();
+    if (!isTechnicalOwner() && target.memberUid !== myMemberUid) {
+      alert('Solo puedes revocar dispositivos vinculados a tu propio perfil.');
+      return;
+    }
+    if (deviceUid === currentUser.uid) {
+      alert('Este es el dispositivo que estás utilizando. Para dejar de usarlo, cierra la sesión de este teléfono.');
+      return;
+    }
+    if (!confirm('¿Revocar este dispositivo? Dejará de tener acceso a Frecuencia Cero.')) return;
+    try {
+      await db.ref(bandPath('devices/' + deviceUid)).remove();
+      await db.ref(bandPath('presence/' + deviceUid)).remove().catch(function () {});
+      setStatus('Dispositivo revocado correctamente.', 'success');
+      renderMyDevices(); renderMemberAdmin();
+    } catch (err) {
+      setStatus('No se pudo revocar el dispositivo: ' + (err.message || err), 'error');
+    }
+  }
+  function renderMyDevices() {
+    var box = $('fcMyDevices'); if (!box) return;
+    box.innerHTML = '';
+    if (!isConnected() || !memberProfile) { box.textContent = 'Conecta tu perfil para administrar tus dispositivos.'; return; }
+    var uid = canonicalMemberUid();
+    var own = Object.keys(deviceList || {}).filter(function (deviceUid) { return deviceList[deviceUid] && deviceList[deviceUid].memberUid === uid; });
+    var primary = document.createElement('div'); primary.className = 'fc-member-row';
+    var primaryInfo = document.createElement('div'); primaryInfo.className = 'fc-member-info';
+    var primaryName = document.createElement('strong'); primaryName.textContent = 'Dispositivo principal actual';
+    var primaryDetail = document.createElement('small'); primaryDetail.textContent = 'Este perfil está abierto en este dispositivo.';
+    primaryInfo.append(primaryName, primaryDetail); primary.appendChild(primaryInfo); box.appendChild(primary);
+    if (!own.length) { var empty = document.createElement('p'); empty.className = 'note'; empty.textContent = 'Todavía no has vinculado otros teléfonos o tablets.'; box.appendChild(empty); return; }
+    own.forEach(function (deviceUid) {
+      var device = deviceList[deviceUid] || {}, row = document.createElement('div'); row.className = 'fc-member-row';
+      var info = document.createElement('div'); info.className = 'fc-member-info';
+      var name = document.createElement('strong'); name.textContent = (device.name || 'Dispositivo vinculado') + (deviceUid === currentUser.uid ? ' · Este dispositivo' : '');
+      var detail = document.createElement('small'); detail.textContent = (presenceMap[deviceUid] && presenceMap[deviceUid].online ? 'En línea' : 'Desconectado') + ' · ' + deviceUid.slice(0, 9) + '…';
+      info.append(name, detail); row.appendChild(info);
+      if (deviceUid !== currentUser.uid) { var revoke = document.createElement('button'); revoke.className = 'danger'; revoke.textContent = 'Revocar'; revoke.type = 'button'; revoke.onclick = function () { revokeDevice(deviceUid); }; row.appendChild(revoke); }
+      box.appendChild(row);
+    });
+  }
+
+  function renderJoinRequests() {
+    var box = $('fcJoinRequestsList'); if (!box) return;
+    box.innerHTML = '';
+    if (!isTechnicalOwner()) return;
+    var ids = Object.keys(joinRequestList || {});
+    if (!ids.length) { box.textContent = 'No hay solicitudes pendientes.'; return; }
+    ids.forEach(function (uid) {
+      var req = joinRequestList[uid] || {};
+      var row = document.createElement('div'); row.className = 'fc-member-row';
+      var info = document.createElement('div'); info.className = 'fc-member-info';
+      var name = document.createElement('strong'); name.textContent = req.deviceName || 'Nuevo integrante';
+      var detail = document.createElement('small'); detail.textContent = 'Solicita: ' + roleName(req.requestedRole) + ' · ' + uid.slice(0, 9) + '…';
+      info.append(name, detail);
+      var select = document.createElement('select'); select.setAttribute('aria-label','Función para aprobar integrante');
+      ROLE_OPTIONS.forEach(function (r) {
+        if (r[0] === 'accordionist' || r[0] === 'pending') return;
+        var opt = document.createElement('option'); opt.value = r[0]; opt.textContent = r[1];
+        var occupied = Object.keys(memberList || {}).some(function (otherUid) { return otherUid !== uid && memberList[otherUid] && memberList[otherUid].role === r[0]; });
+        opt.disabled = occupied;
+        if (r[0] === req.requestedRole && !occupied) opt.selected = true;
+        select.appendChild(opt);
+      });
+      var approve = document.createElement('button'); approve.className = 'p'; approve.textContent = 'Aprobar'; approve.onclick = function () { approveJoinRequest(uid, select.value); };
+      var reject = document.createElement('button'); reject.textContent = '×'; reject.title = 'Rechazar'; reject.onclick = function () { rejectJoinRequest(uid); };
+      row.append(info, select, approve, reject); box.appendChild(row);
+    });
   }
   function renderMemberAdmin() {
     var box = $('fcMembers'); if (!box) return;
@@ -321,13 +663,22 @@
       var m = memberList[uid] || {}, row = document.createElement('div'); row.className = 'fc-member-row';
       var info = document.createElement('div'); info.className = 'fc-member-info';
       var name = document.createElement('strong'); name.textContent = m.name || m.email || 'Integrante';
-      var detail = document.createElement('small'); detail.textContent = (m.email || '') + (uid === currentUser.uid ? ' · Este teléfono' : '') + (m.online ? ' · En línea' : ' · Desconectado');
+      var linkedCount = Object.keys(deviceList || {}).filter(function (deviceUid) { return deviceList[deviceUid] && deviceList[deviceUid].memberUid === uid; }).length;
+      var detail = document.createElement('small'); detail.textContent = (m.email || '') + (uid === currentUser.uid ? ' · Este dispositivo principal' : '') + (linkedCount ? ' · ' + linkedCount + ' dispositivo(s) vinculado(s)' : '') + (m.online ? ' · En línea' : ' · Desconectado');
       info.append(name, detail);
       var select = document.createElement('select'); select.setAttribute('aria-label', 'Rol de ' + (m.name || 'integrante'));
-      ROLE_OPTIONS.forEach(function (r) { if (r[0] === 'voice1' && bandMeta && uid !== bandMeta.ownerUid) return; var o = document.createElement('option'); o.value = r[0]; o.textContent = r[1]; if (r[0] !== 'pending' && r[0] !== m.role) { var used = Object.keys(memberList || {}).some(function (otherUid) { return otherUid !== uid && memberList[otherUid] && memberList[otherUid].role === r[0]; }); if (used) o.disabled = true; } select.appendChild(o); });
-      select.value = m.role || 'pending'; select.disabled = memberRole !== 'voice1' || (bandMeta && uid === bandMeta.ownerUid);
+      ROLE_OPTIONS.forEach(function (r) { if (r[0] === 'accordionist' && bandMeta && uid !== bandMeta.ownerUid) return; var o = document.createElement('option'); o.value = r[0]; o.textContent = r[1]; if (r[0] !== 'pending' && r[0] !== m.role) { var used = Object.keys(memberList || {}).some(function (otherUid) { return otherUid !== uid && memberList[otherUid] && memberList[otherUid].role === r[0]; }); if (used) o.disabled = true; } select.appendChild(o); });
+      select.value = m.role || 'pending'; select.disabled = !isTechnicalOwner() || (bandMeta && uid === bandMeta.ownerUid);
       select.onchange = function () { setMemberRole(uid, select.value); };
-      row.append(info, select); box.appendChild(row);
+      row.append(info, select);
+      if (isTechnicalOwner() && !(bandMeta && uid === bandMeta.ownerUid)) { var remove = document.createElement('button'); remove.className = 'danger'; remove.type = 'button'; remove.title = 'Quitar integrante y revocar sus dispositivos'; remove.textContent = 'Quitar'; remove.onclick = function () { removeMember(uid); }; row.appendChild(remove); }
+      box.appendChild(row);
+      Object.keys(deviceList || {}).filter(function (deviceUid) { return deviceList[deviceUid] && deviceList[deviceUid].memberUid === uid; }).forEach(function (deviceUid) {
+        var device = deviceList[deviceUid], deviceRow = document.createElement('div'); deviceRow.className = 'fc-member-device';
+        var deviceName = document.createElement('span'); deviceName.textContent = '↳ ' + (device.name || 'Dispositivo vinculado') + ' · ' + deviceUid.slice(0, 8) + '…';
+        var revoke = document.createElement('button'); revoke.className = 'danger'; revoke.type = 'button'; revoke.textContent = 'Revocar'; revoke.onclick = function () { revokeDevice(deviceUid); };
+        deviceRow.append(deviceName, revoke); box.appendChild(deviceRow);
+      });
     });
   }
   function eventAssignmentDefaults() { return { accordionist: 'accordion', keyboardist: 'keyboard' }; }
@@ -441,7 +792,17 @@
       renderEventPlaylist(); renderLiveBanner();
     } catch (err) { setStatus('No se pudo actualizar la canción en vivo: ' + err.message, 'error'); }
   }
+  function updateMemberPresence() {
+    Object.keys(memberList || {}).forEach(function (uid) {
+      var online = !!(presenceMap[uid] && presenceMap[uid].online);
+      if (!online) online = Object.keys(deviceList || {}).some(function (deviceUid) {
+        return deviceList[deviceUid] && deviceList[deviceUid].memberUid === uid && presenceMap[deviceUid] && presenceMap[deviceUid].online;
+      });
+      memberList[uid].online = online;
+    });
+  }
   function renderMembersStatus() {
+    updateMemberPresence();
     var online = 0;
     Object.keys(memberList || {}).forEach(function (uid) { if (memberList[uid] && memberList[uid].online) online++; });
     setText('fcOnlineCount', Object.keys(memberList || {}).length + '/6 integrantes · ' + online + ' en línea');
@@ -450,7 +811,7 @@
   // Las escrituras locales del director se publican en la base compartida.
   window.save = function () {
     if (typeof originalSave === 'function') originalSave();
-    if (!applyingRemote && db && bandId && memberRole === 'voice1') {
+    if (!applyingRemote && db && bandId && isTechnicalOwner()) {
       var payload = mapById(window.songs || []), serialized = safeJson(payload);
       // Evita volver a subir todo el catálogo al abrir una canción si nada cambió.
       if (serialized !== lastCatalogJson) {
@@ -461,7 +822,7 @@
   };
   window.saveEvents = function () {
     if (typeof originalSaveEvents === 'function') originalSaveEvents();
-    if (!applyingRemote && db && bandId && memberRole === 'voice1') {
+    if (!applyingRemote && db && bandId && (isTechnicalOwner() || memberRole === 'voice1')) {
       var payload = mapById(window.events || []), serialized = safeJson(payload);
       if (serialized !== lastEventsJson) {
         lastEventsJson = serialized;
@@ -481,7 +842,7 @@
 
   // Editor de evento: asignación independiente por canción para acordeonista y tecladista.
   window.editEvent = function (id) {
-    if (isConnected() && memberRole !== 'voice1') { alert('Solo Voz 1 · Director puede editar los eventos.'); return; }
+    if (isConnected() && !canManageEvents()) { alert('Solo Voz 1 · Director o el propietario técnico pueden editar los eventos.'); return; }
     var ev = id ? window.findEvent(id) : null;
     window.eventEditId = id || null;
     window.eventDraftSongIds = ev ? (ev.songIds || []).slice() : [];
@@ -521,7 +882,7 @@
     window.renderSongPicker();
   };
   window.saveEventEditor = function () {
-    if (isConnected() && memberRole !== 'voice1') { alert('Solo Voz 1 · Director puede guardar eventos.'); return; }
+    if (isConnected() && !canManageEvents()) { alert('Solo Voz 1 · Director o el propietario técnico pueden guardar eventos.'); return; }
     var name = $('eventName').value.trim();
     if (!name) { alert('Escribe el nombre del evento.'); $('eventName').focus(); return; }
     var ev = window.eventEditId ? window.findEvent(window.eventEditId) : null;
@@ -544,7 +905,7 @@
       meta.textContent = (ev.songIds || []).length + ' canciones · aprox. ' + window.formatDurationLong(window.eventDuration(ev.songIds)) + (isLive ? ' · EN VIVO' : '');
       main.append(name, meta); main.onclick = function () { window.openEvent(ev.id); };
       row.append(icon, main);
-      if (!isConnected() || memberRole === 'voice1') { var edit = document.createElement('button'); edit.className = 'event-folder-edit'; edit.textContent = 'Editar'; edit.onclick = function () { window.editEvent(ev.id); }; row.appendChild(edit); }
+      if (!isConnected() || canManageEvents()) { var edit = document.createElement('button'); edit.className = 'event-folder-edit'; edit.textContent = 'Editar'; edit.onclick = function () { window.editEvent(ev.id); }; row.appendChild(edit); }
       l.appendChild(row);
     });
   };
@@ -555,7 +916,7 @@
     $('playlistMeta').textContent = (ev.songIds || []).length + ' canciones · duración aproximada: ' + window.formatDuration(window.eventDuration(ev.songIds)) + ' (' + window.formatDurationLong(window.eventDuration(ev.songIds)) + ')' + (isConnected() ? ' · Banda sincronizada' : ' · Guardado en este teléfono');
     $('playlistMode').textContent = isConnected() ? roleName(memberRole) : (window.mode === 's' ? 'Vista cantante' : 'Vista bajista');
     $('playlistModeToggle').style.display = 'none';
-    $('playlistEdit').style.display = (!isConnected() || memberRole === 'voice1') ? '' : 'none';
+    $('playlistEdit').style.display = (!isConnected() || canManageEvents()) ? '' : 'none';
     $('eventShare').style.display = isConnected() ? 'none' : '';
     var shareArea = document.querySelector('.event-share-area'); if (shareArea) shareArea.style.display = isConnected() ? 'none' : '';
     var l = $('playlistSongs'); l.innerHTML = '';
@@ -599,12 +960,12 @@
     var menu = document.querySelector('#vm .menu-content');
     if (menu && !$('fcSyncPanel')) {
       var panel = document.createElement('section'); panel.id = 'fcSyncPanel'; panel.className = 'fc-sync-panel';
-      panel.innerHTML = '<div class="fc-panel-head"><div><strong>Mi banda y sincronización</strong><p class="note">Configura Firebase una sola vez en cada teléfono. Después, los eventos aparecerán automáticamente.</p></div><span class="fc-panel-icon">☁️</span></div>' +
-        '<div id="fcSyncStatus" class="fc-status neutral">Sincronización sin configurar; la aplicación funciona localmente.</div>' +
-        '<label class="fc-field-label" for="fcFirebaseConfig">Configuración web de Firebase</label><textarea id="fcFirebaseConfig" rows="5" placeholder="Pega aquí el objeto firebaseConfig de tu aplicación web de Firebase"></textarea><button id="fcConnect" class="p">Guardar configuración y conectar</button>' +
-        '<div class="fc-auth-row"><button id="fcSignIn">Iniciar sesión con Google</button><button id="fcSignOut" style="display:none">Cerrar sesión</button></div>' +
-        '<div class="fc-band-box"><strong>Mi banda</strong><p id="fcBandSummary" class="note">Aún no estás unido a una banda.</p><input id="fcBandName" placeholder="Nombre de la banda" value="Frecuencia Cero"><div class="fc-auth-row"><button id="fcCreateBand" class="p">Crear banda</button></div><div id="fcJoinHint" class="note">La primera cuenta crea la banda y queda como Voz 1 · Director.</div><label class="fc-field-label" for="fcJoinCode">Código de incorporación (solo la primera vez)</label><input id="fcJoinCode" autocomplete="off" placeholder="Código que te dio el director"><button id="fcJoinBand">Unirme a Frecuencia Cero</button><div id="fcBandActions" style="display:none"><div id="fcInviteWrap" style="display:none"><label class="fc-field-label" for="fcInviteCode">Invitación para integrantes</label><div class="fc-invite-row"><input id="fcInviteCode" readonly><button id="fcCopyInvite">Copiar</button><button id="fcNewInvite">Renovar</button></div><p id="fcInviteMsg" class="note">Cada integrante usa este código una sola vez. No se usa para entrar a cada evento.</p></div></div></div>' +
-        '<div id="fcMemberAdmin" class="fc-member-admin" style="display:none"><div class="fc-member-head"><strong>Integrantes y funciones (6 plazas)</strong><span id="fcOnlineCount" class="note"></span></div><p class="note">Asigna una sola persona a cada función: Voz 1, Voz 2, Bajista, Acordeonista, Baterista y Tecladista.</p><div id="fcMembers"></div></div>' +
+      panel.innerHTML = '<div class="fc-panel-head"><div><strong>Mi banda y sincronización</strong><p class="note">Cada teléfono tiene una identidad anónima. El propietario técnico autoriza cada integrante; cada integrante puede vincular sus propios dispositivos mediante QR.</p></div><span class="fc-panel-icon">☁️</span></div>' +
+        '<div id="fcSyncStatus" class="fc-status neutral">Conectando con Firebase…</div>' +
+        '<div class="fc-band-box"><strong>Mi perfil en Frecuencia Cero</strong><label class="fc-field-label" for="fcProfileSelect">Selecciona quién utiliza este teléfono</label><select id="fcProfileSelect"><option value="">Seleccionar perfil…</option><option value="voice1">Voz 1 · Hombre (Director)</option><option value="voice2">Voz 2 · Mujer</option><option value="bass">Bajista</option><option value="accordionist">Acordeonista</option><option value="drummer">Baterista</option><option value="keyboardist">Tecladista</option></select><button id="fcProfileSave" class="p">Guardar mi perfil</button><p id="fcBandSummary" class="note">Selecciona tu perfil para continuar.</p><label class="fc-field-label" for="fcBandName">Nombre de la banda</label><input id="fcBandName" placeholder="Frecuencia Cero" value="Frecuencia Cero"><button id="fcCreateBand" class="p" style="display:none">Crear banda como propietario técnico</button><button id="fcRequestJoin" class="p" style="display:none">Solicitar incorporación</button><p class="note">El Acordeonista es el propietario técnico del catálogo y los dispositivos. Voz 1 se incorpora como director musical y organiza los eventos. Cualquier integrante puede vincular sus propios dispositivos con QR.</p><div class="note">ID de este teléfono: <code id="fcDeviceUid">Preparando…</code> <button id="fcCopyUid" style="display:none">Copiar ID</button></div><button id="fcLinkDevice" class="p" style="display:none">▦ Vincular otro dispositivo con QR</button><div id="fcPairQrBox" class="fc-pair-box" style="display:none"></div><button id="fcScanDeviceLink" style="display:none">📷 Escanear QR para vincular este dispositivo</button><div id="fcPairScannerWrap" class="fc-pair-box" style="display:none"><div id="fcPairScanner"></div><p id="fcPairScannerStatus" class="note">Preparando cámara…</p><button type="button" id="fcPairScannerClose">Cerrar cámara</button></div></div>' +
+        '<div id="fcJoinRequests" class="fc-member-admin" style="display:none"><div class="fc-member-head"><strong>Solicitudes de integrantes</strong></div><div id="fcJoinRequestsList"></div></div>' +
+        '<div id="fcMemberAdmin" class="fc-member-admin" style="display:none"><div class="fc-member-head"><strong>Integrantes y funciones (6 plazas)</strong><span id="fcOnlineCount" class="note"></span></div><p class="note">El propietario técnico administra el catálogo, integrantes y dispositivos. Voz 1 dirige los eventos y puede crear y organizar repertorios. Cada función se asigna a una sola persona.</p><div id="fcMembers"></div></div>' +
+        '<div id="fcMyDevicesBox" class="fc-member-admin" style="display:none"><div class="fc-member-head"><strong>Mis dispositivos vinculados</strong></div><p class="note">Puedes vincular varios teléfonos o tablets a tu mismo perfil y revocar los que ya no utilices.</p><div id="fcMyDevices"></div></div>' +
         '<label class="fc-follow-row"><input type="checkbox" id="fcFollow" checked> Seguir automáticamente la canción que elija Voz 1</label>';
       var insertion = $('mi'); menu.insertBefore(panel, insertion);
     }
@@ -630,12 +991,24 @@
     if ($('fcSignIn')) $('fcSignIn').onclick = signIn;
     if ($('fcSignOut')) $('fcSignOut').onclick = signOut;
     if ($('fcCreateBand')) $('fcCreateBand').onclick = createBand;
-    if ($('fcJoinBand')) $('fcJoinBand').onclick = joinBand;
-    if ($('fcNewInvite')) $('fcNewInvite').onclick = createInviteCode;
-    if ($('fcCopyInvite')) $('fcCopyInvite').onclick = function () {
-      var text = $('fcInviteCode').value;
-      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(function () { setText('fcInviteMsg', 'Código copiado. Cada músico lo utiliza una sola vez para incorporarse.'); });
-      else { $('fcInviteCode').focus(); $('fcInviteCode').select(); setText('fcInviteMsg', 'Copia el código seleccionado.'); }
+    if ($('fcRequestJoin')) $('fcRequestJoin').onclick = requestJoin;
+    if ($('fcLinkDevice')) $('fcLinkDevice').onclick = createDevicePairing;
+    if ($('fcScanDeviceLink')) $('fcScanDeviceLink').onclick = startPairScanner;
+    if ($('fcPairScannerClose')) $('fcPairScannerClose').onclick = stopPairScanner;
+    if ($('fcProfileSave')) $('fcProfileSave').onclick = function () {
+      var role = $('fcProfileSelect').value;
+      if (!role) { alert('Selecciona una función.'); return; }
+      if (isConnected()) { alert('Tu función ya fue asignada por el propietario técnico. Para cambiarla, solicita que actualice tu perfil.'); return; }
+      selectedProfileRole = role; localStorage.setItem(PROFILE_KEY, role);
+      updateSyncButtons();
+      setStatus(role === 'voice1' ? 'Perfil Voz 1 seleccionado. Solicita incorporación a la banda.' : 'Perfil ' + roleName(role) + ' seleccionado. Pulsa Solicitar incorporación.', 'success');
+    };
+    if ($('fcProfileSelect')) $('fcProfileSelect').onchange = function () { selectedProfileRole = this.value; updateSyncButtons(); };
+    if ($('fcCopyUid')) $('fcCopyUid').onclick = function () {
+      var uid = currentUser && currentUser.uid || '';
+      if (!uid) return;
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(uid).then(function () { setStatus('ID de este dispositivo copiado.', 'success'); });
+      else { setStatus('ID del teléfono: ' + uid, 'neutral'); }
     };
     profileButtonActions();
   }
@@ -645,15 +1018,15 @@
       '.fc-sync-panel{border:1px solid var(--line);border-radius:16px;padding:13px;background:var(--card);display:flex;flex-direction:column;gap:9px}' +
       '.fc-panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}.fc-panel-head strong{font-size:17px}.fc-panel-icon{font-size:25px}' +
       '.fc-status{padding:9px 11px;border-radius:10px;font-size:13px;font-weight:700;background:var(--bg)}.fc-status.success{color:#16764b;background:rgba(22,139,88,.10)}.fc-status.warning{color:#946200;background:rgba(220,160,30,.13)}.fc-status.error{color:#b3261e;background:rgba(179,38,30,.10)}' +
-      '.fc-field-label{font-size:12px;color:var(--mut);font-weight:800;margin-top:3px}.fc-auth-row,.fc-invite-row{display:flex;gap:7px}.fc-auth-row button,.fc-invite-row button{flex:1;min-width:0}.fc-band-box{border-top:1px solid var(--line);padding-top:10px;display:flex;flex-direction:column;gap:8px}.fc-member-admin{border-top:1px solid var(--line);padding-top:10px}.fc-member-head{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:8px}.fc-member-row{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line)}.fc-member-info{flex:1;min-width:0}.fc-member-info strong,.fc-member-info small{display:block;overflow-wrap:anywhere}.fc-member-info small{font-size:11px;color:var(--mut)}.fc-member-row select{width:47%;min-width:128px;padding:7px;font-size:12px}.fc-follow-row{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700}.fc-follow-row input{width:18px;min-height:18px;height:18px}.fc-live-banner{width:calc(100% - 24px);margin:0 12px 8px;text-align:left;background:rgba(22,139,88,.12);border-color:rgba(22,139,88,.35);color:var(--fg);font-size:13px;font-weight:850;display:flex;align-items:center;gap:8px}.fc-live-banner span:nth-child(2){flex:1}.fc-live-dot{width:9px;height:9px;border-radius:100%;background:#16a36a;display:inline-block}.fc-role-bar{padding:8px 12px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:var(--bg)}.fc-role-line{display:flex;align-items:center;justify-content:space-between;gap:7px;width:100%;font-size:12px}.fc-role-line button{font-size:12px;min-height:36px;padding:6px 9px}.fc-role-bar select{min-height:38px;font-size:13px}.fc-next-only{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px 18px;gap:12px;overflow:auto}.fc-next-chip{padding:6px 12px;border-radius:20px;background:var(--acc);color:var(--accfg);font-weight:900;font-size:12px}.fc-next-caption{font-size:11px;color:var(--mut);font-weight:900;letter-spacing:.12em}.fc-next-current{font-size:clamp(25px,6vw,38px);font-weight:900;line-height:1.1}.fc-next-title{font-size:clamp(28px,8vw,48px);font-weight:950;color:var(--acc);line-height:1.08}.fc-next-key{font-size:14px;color:var(--mut);font-weight:800}.fc-event-selected-row{display:block}.fc-event-song-head{display:flex;align-items:center;gap:7px}.fc-assignment-controls{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:7px 3px 2px 29px}.fc-assignment-controls label{font-size:10px;color:var(--mut);font-weight:800}.fc-assignment-controls select{display:block;min-height:35px;font-size:12px;padding:5px;margin-top:3px}.fc-live-song{background:rgba(22,139,88,.09);border-radius:10px;padding-left:8px;padding-right:8px}.fc-play-song{font-size:12px;padding:7px 9px;min-height:36px}';
+      '.fc-field-label{font-size:12px;color:var(--mut);font-weight:800;margin-top:3px}.fc-auth-row,.fc-invite-row{display:flex;gap:7px}.fc-auth-row button,.fc-invite-row button{flex:1;min-width:0}.fc-band-box{border-top:1px solid var(--line);padding-top:10px;display:flex;flex-direction:column;gap:8px}.fc-member-admin{border-top:1px solid var(--line);padding-top:10px}.fc-member-head{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:8px}.fc-member-row{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line)}.fc-member-info{flex:1;min-width:0}.fc-member-info strong,.fc-member-info small{display:block;overflow-wrap:anywhere}.fc-member-info small{font-size:11px;color:var(--mut)}.fc-member-row select{width:47%;min-width:128px;padding:7px;font-size:12px}.fc-sync-panel code{font-size:10px;overflow-wrap:anywhere}.fc-sync-panel #fcProfileSelect{width:100%}.fc-sync-panel #fcCopyUid{font-size:11px;min-height:30px;padding:4px 8px}.fc-follow-row{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700}.fc-follow-row input{width:18px;min-height:18px;height:18px}.fc-live-banner{width:calc(100% - 24px);margin:0 12px 8px;text-align:left;background:rgba(22,139,88,.12);border-color:rgba(22,139,88,.35);color:var(--fg);font-size:13px;font-weight:850;display:flex;align-items:center;gap:8px}.fc-live-banner span:nth-child(2){flex:1}.fc-live-dot{width:9px;height:9px;border-radius:100%;background:#16a36a;display:inline-block}.fc-role-bar{padding:8px 12px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:var(--bg)}.fc-role-line{display:flex;align-items:center;justify-content:space-between;gap:7px;width:100%;font-size:12px}.fc-role-line button{font-size:12px;min-height:36px;padding:6px 9px}.fc-role-bar select{min-height:38px;font-size:13px}.fc-next-only{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px 18px;gap:12px;overflow:auto}.fc-next-chip{padding:6px 12px;border-radius:20px;background:var(--acc);color:var(--accfg);font-weight:900;font-size:12px}.fc-next-caption{font-size:11px;color:var(--mut);font-weight:900;letter-spacing:.12em}.fc-next-current{font-size:clamp(25px,6vw,38px);font-weight:900;line-height:1.1}.fc-next-title{font-size:clamp(28px,8vw,48px);font-weight:950;color:var(--acc);line-height:1.08}.fc-next-key{font-size:14px;color:var(--mut);font-weight:800}.fc-event-selected-row{display:block}.fc-event-song-head{display:flex;align-items:center;gap:7px}.fc-assignment-controls{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:7px 3px 2px 29px}.fc-assignment-controls label{font-size:10px;color:var(--mut);font-weight:800}.fc-assignment-controls select{display:block;min-height:35px;font-size:12px;padding:5px;margin-top:3px}.fc-live-song{background:rgba(22,139,88,.09);border-radius:10px;padding-left:8px;padding-right:8px}.fc-play-song{font-size:12px;padding:7px 9px;min-height:36px}' +
+      '.fc-member-device{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 8px 8px 28px;font-size:11px;color:var(--mut)}.fc-member-device button{min-height:30px;padding:4px 8px;font-size:11px}.fc-pair-box{border:1px solid var(--line);border-radius:13px;padding:12px;background:var(--bg);display:flex;flex-direction:column;gap:9px}.fc-pair-title{font-size:16px;font-weight:900}.fc-pair-qr{display:flex;justify-content:center;align-items:center;background:#fff;border-radius:10px;padding:12px;min-height:230px}.fc-pair-qr img{max-width:100%;height:auto}.fc-pair-url{font-size:10px;color:var(--mut);overflow-wrap:anywhere;user-select:text}.fc-pair-box button{width:100%}';
     var style = document.createElement('style'); style.textContent = css; document.head.appendChild(style);
   }
 
   function startAutoConnect() {
-    var savedConfig = localStorage.getItem(CFG_KEY);
-    if ($('fcFirebaseConfig') && savedConfig) $('fcFirebaseConfig').value = JSON.stringify(JSON.parse(savedConfig), null, 2);
-    if (savedConfig && window.firebase) connectFirebase();
-    else if (!window.firebase) setStatus('La aplicación está lista en modo local. Para sincronizar, configura Firebase con Internet.', 'neutral');
+    if (window.firebase) connectFirebase();
+    else setStatus('Firebase no se ha cargado. Comprueba Internet y vuelve a abrir la página.', 'error');
+    if ($('fcProfileSelect') && selectedProfileRole) $('fcProfileSelect').value = selectedProfileRole;
     updateSyncButtons();
   }
 
@@ -666,7 +1039,7 @@
   window.openEvent = function (id) { _openEvent(id); renderRoleCurrentNext(); };
   var oldDelete = $('eventDelete').onclick;
   $('eventDelete').onclick = function () {
-    if (isConnected() && memberRole !== 'voice1') { alert('Solo Voz 1 · Director puede borrar eventos.'); return; }
+    if (isConnected() && !canManageEvents()) { alert('Solo Voz 1 · Director o el propietario técnico pueden borrar eventos.'); return; }
     if (oldDelete) oldDelete();
   };
   $('eventNew').onclick = function () { window.editEvent(null); };

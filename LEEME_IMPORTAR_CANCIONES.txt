@@ -1,0 +1,76 @@
+FRECUENCIA CERO · IMPORTAR LETRAS CON ACORDES
+================================================
+
+EDITOR DE UNA CANCIÓN
+---------------------
+1. Entra al catálogo.
+2. Pulsa + para agregar una canción, o abre una canción y pulsa Editar.
+3. Completa el nombre y el tono. El tono coloca la canción en el bloque tonal correspondiente del catálogo.
+4. En Duración escribe una estimación mm:ss (por ejemplo 03:20). Si no tienes el dato exacto, deja la estimación que propone la app y ajústala después.
+5. Pega la letra con acordes en el cuadro Letra con acordes.
+6. Pulsa “Detectar nombre, tono y acomodar acordes”.
+7. Revisa la alineación y pulsa Guardar.
+
+FORMATO RECOMENDADO PARA PEGAR
+------------------------------
+Nombre: Yaquesita
+Tono: Sol
+Duración: 03:20
+
+G
+Yo tengo una Yaquesita que quise mucho en Sonora
+D7
+Y cuando ella baila cumbia el que la ve se enamora
+G                 C
+Ay mi Yaquesita ay mi Yaquesita
+D7                                               G
+Tú tienes tu cuerpo hermoso que pareces sirenita
+
+También acepta acordes ya escritos dentro de la letra:
+[G]Yo tengo una Yaquesita [D7]que quise mucho en Sonora.
+
+ALINEACIÓN DE ACORDES
+---------------------
+- Cuando los acordes vienen en un renglón separado, la app usa las columnas/espacios para estimar debajo de qué palabra va cada acorde.
+- Copia el texto conservando los espacios entre acordes siempre que sea posible.
+- La conversión es automática pero aproximada: revisa la vista del bajista antes de dar por terminada la canción.
+- Si el sitio de origen pierde los espacios, puedes corregir las marcas manualmente usando [G], [D7], [C], etc.
+- Los acordes se guardan como marcas [ACORDE] dentro del texto. El cantante no los ve; el bajista los ve encima de la letra.
+
+IMPORTAR VARIAS CANCIONES
+-------------------------
+En Más (⋯) pega varias canciones separadas por una línea que empiece con #:
+
+# Yaquesita
+Tono: Sol
+Duración: 03:20
+G
+Yo tengo una Yaquesita...
+D7
+Y cuando ella baila...
+
+# Otra canción
+Tono: Re
+Duración: 02:55
+D
+Letra de la segunda canción...
+
+También puedes repetir encabezados Nombre:, Tono: y Duración: sin el #.
+Si una canción ya existe con el mismo nombre, la importación actualiza su letra y conserva su ID, ajustes y pertenencia a eventos.
+
+TONALIDADES/BLOQUES DISPONIBLES
+-------------------------------
+Sol, Fa, Do, Sib, Re, La, Solm, Si menor (Sim/Bm) y La menor (Am/Lam).
+La app agrupa el catálogo por el tono guardado. Si cambias el tono en el editor, la canción cambia de bloque.
+
+VISTA DEL BAJISTA
+-----------------
+En la parte superior aparece el tono, por ejemplo “TONO: SOL”. Debajo se muestran la letra atenuada y los acordes colocados sobre cada frase.
+La vista del cantante muestra solamente la letra.
+
+PERMISOS DE FRECUENCIA CERO
+---------------------------
+- Propietario técnico: perfil Acordeonista. Administra el catálogo, letras, acordes, tonalidades, integrantes y dispositivos.
+- Director musical: Voz 1. Puede crear y organizar eventos y controlar la canción actual en vivo.
+- Los demás perfiles siguen el evento y tienen su vista personal.
+- Los cambios del catálogo se publican desde el dispositivo propietario una vez que Firebase esté configurado.

@@ -1,0 +1,30 @@
+FRECUENCIA CERO · ACTUALIZACIÓN DE IMPORTADOR, ROLES Y SINCRONIZACIÓN
+=====================================================================
+
+CONTENIDO PARA GITHUB PAGES
+---------------------------
+Este paquete conserva el diseño azul, logos e iconos de la versión unificada e incluye:
+- Editor de una canción con campos Nombre, Tono/Bloque, Duración y Letra con acordes.
+- Conversión de acordes en renglones separados a marcas [ACORDE] dentro de la letra.
+- Importación múltiple con # Nombre y metadatos Nombre:, Tono:, Duración:.
+- Vista de cantante sin acordes.
+- Vista de bajista con el tono grande al inicio y acordes sobre cada frase.
+- Perfiles anónimos, roles técnicos y de director, QR de vinculación y sincronización Firebase.
+- Administración de dispositivos vinculados y gestión de integrantes.
+
+CÓMO ACTUALIZAR
+---------------
+1. Descomprime este ZIP.
+2. En el repositorio GitHub Pages de Frecuencia Cero, entra a Code > Add file > Upload files.
+3. Sube el CONTENIDO de la carpeta descomprimida a la raíz del repositorio, reemplazando los archivos anteriores.
+4. Pulsa Commit changes y espera a que GitHub Pages termine el despliegue.
+5. El Service Worker utiliza una nueva versión de caché (v9). Cierra la PWA y vuelve a abrirla para que reciba los archivos nuevos. Si siguiera mostrando la versión anterior, abre el sitio desde Safari/Chrome y recarga una vez conectado a Internet.
+
+NO subas el ZIP como archivo único. Debes subir index.html, fc-sync.js, sw.js, manifest.webmanifest, iconos y archivos auxiliares a la raíz.
+
+FIREBASE
+--------
+La configuración web del proyecto frecuencia-cerov1 está integrada en fc-sync.js.
+La autenticación anónima debe seguir habilitada y jordi601.github.io debe estar en los dominios autorizados de Authentication.
+La base de datos permanece protegida hasta publicar las reglas personalizadas. Consulta LEEME_FIREBASE_ROLES_PROPIETARIO.txt y firebase-database.rules.template.json.
+No publiques reglas de prueba ni abras .read/.write para todo el mundo.

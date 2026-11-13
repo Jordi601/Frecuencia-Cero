@@ -1,0 +1,55 @@
+FRECUENCIA CERO · FIREBASE Y PERMISOS DE BANDA
+================================================
+
+Proyecto Firebase ya preparado en el código:
+- Project ID: frecuencia-cerov1
+- Realtime Database: https://frecuencia-cerov1-default-rtdb.firebaseio.com
+- Autenticación: Anonymous
+- ID fijo de banda: frecuencia-cero-main
+
+ROLES
+-----
+1. Propietario técnico: perfil Acordeonista (el creador técnico que administra el catálogo).
+   - Puede agregar/eliminar canciones y editar letras, acordes, tono y duración.
+   - Puede aprobar o rechazar integrantes, reasignar sus funciones y revocar dispositivos vinculados.
+   - Puede crear y editar eventos.
+   - Si Voz 1 deja de poder dirigir, el propietario puede liberar/reasignar la función Voz 1 desde Administración de integrantes.
+2. Director musical: Voz 1 (cantante hombre).
+   - Puede crear eventos, seleccionar canciones del catálogo, reordenar, quitar/agregar canciones y editar la lista del evento.
+   - Es el único que cambia la canción compartida en vivo.
+3. Otros perfiles: Voz 2, Bajista, Baterista y Tecladista.
+   - Siguen el evento y tienen su vista funcional.
+4. Acordeonista y Tecladista pueden alternar automáticamente por canción entre su instrumento principal y Guitarra, con cambio manual.
+
+PRIMERA CONFIGURACIÓN (IMPORTANTE: NO OMITIR EL UID)
+---------------------------------------------------
+1. En Firebase Authentication, mantener habilitado Anonymous.
+2. En Authentication > Settings > Authorized domains, agregar:
+   jordi601.github.io
+3. En el teléfono que será el propietario técnico, abrir la web publicada.
+4. En Más > Mi banda y sincronización, seleccionar Acordeonista y pulsar Guardar mi perfil.
+5. Copiar el ID de ese teléfono (UID anónimo). Es el UID que autorizará la creación inicial de la banda.
+6. Abrir firebase-database.rules.template.json y reemplazar exactamente:
+   REEMPLAZAR_UID_PROPIETARIO_TECNICO
+   por el UID copiado, conservando las comillas simples del valor dentro de la regla.
+7. En Firebase > Realtime Database > Rules, reemplazar las reglas actuales por el JSON ya personalizado y pulsar Publish.
+8. Volver a Frecuencia Cero en el MISMO teléfono y pulsar “Crear banda como propietario técnico”.
+9. Los otros cinco integrantes seleccionan su perfil y pulsan “Solicitar incorporación”. El propietario técnico aprueba cada solicitud desde Mi banda y sincronización.
+10. Cada miembro puede generar su QR de vinculación desde un dispositivo aprobado y enlazar sus propias tablets/teléfonos. Los dispositivos extra heredan su perfil y no ocupan una plaza adicional.
+
+SEGURIDAD
+---------
+- No publiques reglas de prueba ni uses .read:true / .write:true.
+- La plantilla mantiene bloqueada la raíz y da permisos específicos por rama.
+- La metadata de propietario queda inmutable desde el cliente después de crear la banda.
+- El UID del propietario se fija antes de crear la banda; no uses un UID de otro teléfono o navegador.
+- No borres los datos del navegador ni cierres la sesión anónima del dispositivo principal sin haber vinculado y probado un dispositivo alternativo.
+- La API key web es visible en el cliente; la seguridad se aplica con Authentication y reglas de Realtime Database, no ocultando esa clave.
+
+SINCRONIZACIÓN
+--------------
+- Catálogo: el propietario técnico publica altas/cambios/bajas.
+- Eventos: propietario técnico o Voz 1 pueden publicar cambios.
+- Estado en vivo: solo Voz 1 puede cambiar canción/posición del evento.
+- Los dispositivos necesitan Internet para recibir cambios en tiempo real. La app conserva datos locales para consulta cuando se pierde conexión.
+- La versión actual sincroniza la canción seleccionada; no transmite la posición exacta de cada acorde entre teléfonos.
