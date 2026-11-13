@@ -1,4 +1,4 @@
-const CACHE_NAME = 'frecuencia-cero-shell-v11-follow-consult';
+const CACHE_NAME = 'frecuencia-cero-shell-v12-owner-onboarding-fix';
 const APP_FILES = [
   './',
   './index.html',

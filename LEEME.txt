@@ -1,0 +1,7 @@
+ACTUALIZACION V12 - INICIO DEL PROPIETARIO
+
+Este paquete corrige el bloqueo del primer dispositivo. Al seleccionar Acordeonista ya no obliga a escanear un QR. Si el UID actual no coincide con el UID propietario configurado, la aplicación muestra el identificador y permite copiarlo desde la pantalla inicial o desde Más > Mi banda y sincronización.
+
+IMPORTANTE: Esta actualización NO cambia todavía las reglas de Firebase. No pulses Crear banda si aparece aviso de UID distinto. Envíanos el UID actual para generar las reglas que correspondan. No publiques reglas abiertas ni uses .read/.write true.
+
+Sube todos los archivos de este paquete a la raíz del repositorio GitHub Pages, reemplazando los anteriores. Luego espera al despliegue, cierra la PWA y vuelve a abrirla.

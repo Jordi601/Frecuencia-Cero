@@ -1,1 +1,1 @@
-Frecuencia Cero v11 - Live follow, consult mode, profile gate
+Frecuencia Cero v12 - Corrección del primer dispositivo propietario. No exige QR para el primer teléfono; expone y permite copiar el UID Firebase actual para alinear las reglas de seguridad.

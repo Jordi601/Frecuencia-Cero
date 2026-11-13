@@ -153,14 +153,16 @@
     if ($('fcProfileSave')) $('fcProfileSave').style.display = connected ? 'none' : '';
     if ($('fcDeviceUid')) $('fcDeviceUid').textContent = currentUser ? currentUser.uid : 'Preparando identidad de este teléfono…';
     if ($('fcCopyUid')) $('fcCopyUid').style.display = currentUser && !connected ? '' : 'none';
-    if ($('fcCreateBand')) $('fcCreateBand').style.display = (!connected && selectedProfileRole === 'accordionist' && currentUser && currentUser.uid === OWNER_UID) ? '' : 'none';
-    if ($('fcCreateBand')) $('fcCreateBand').disabled = !signed || connected || !currentUser || currentUser.uid !== OWNER_UID;
+    if ($('fcCreateBand')) $('fcCreateBand').style.display = (!connected && selectedProfileRole === 'accordionist' && currentUser) ? '' : 'none';
+    if ($('fcCreateBand')) { $('fcCreateBand').disabled = !signed || connected; $('fcCreateBand').textContent = currentUser && currentUser.uid === OWNER_UID ? 'Crear banda como propietario técnico' : 'Revisar este teléfono como propietario'; }
+    if ($('fcOwnerMismatch')) $('fcOwnerMismatch').style.display = (!connected && selectedProfileRole === 'accordionist' && currentUser && currentUser.uid !== OWNER_UID) ? '' : 'none';
+    if ($('fcCurrentOwnerUid')) $('fcCurrentOwnerUid').textContent = currentUser ? currentUser.uid : 'Preparando identidad…';
     if ($('fcRequestJoin')) $('fcRequestJoin').style.display = (!connected && selectedProfileRole && selectedProfileRole !== 'accordionist') ? '' : 'none';
     if ($('fcRequestJoin')) $('fcRequestJoin').disabled = !signed || !!(window.fcJoinRequestPending);
     if ($('fcLinkDevice')) $('fcLinkDevice').style.display = connected ? '' : 'none';
     if ($('fcScanDeviceLink')) $('fcScanDeviceLink').style.display = (!connected && signed) ? '' : 'none';
-    if ($('fcBandName')) $('fcBandName').style.display = (!connected && selectedProfileRole === 'accordionist' && currentUser && currentUser.uid === OWNER_UID) ? '' : 'none';
-    if ($('fcBandSummary')) $('fcBandSummary').textContent = connected ? ((bandMeta && bandMeta.name) || 'Frecuencia Cero') + ' · ' + roleName(memberRole) : (window.fcJoinRequestPending ? 'Solicitud enviada. Esperando aprobación del propietario técnico.' : 'Selecciona tu perfil en este teléfono.');
+    if ($('fcBandName')) $('fcBandName').style.display = (!connected && selectedProfileRole === 'accordionist' && currentUser) ? '' : 'none';
+    if ($('fcBandSummary')) $('fcBandSummary').textContent = connected ? ((bandMeta && bandMeta.name) || 'Frecuencia Cero') + ' · ' + roleName(memberRole) : (window.fcJoinRequestPending ? 'Solicitud enviada. Esperando aprobación del propietario técnico.' : (selectedProfileRole === 'accordionist' && currentUser && currentUser.uid !== OWNER_UID ? 'Este teléfono tiene una identidad distinta a la registrada como propietario. Copia el ID actual para actualizar la autorización inicial.' : 'Selecciona tu perfil en este teléfono.'));
     if ($('fcBandActions')) $('fcBandActions').style.display = connected ? '' : 'none';
     if ($('fcMemberAdmin')) $('fcMemberAdmin').style.display = connected && isTechnicalOwner() ? '' : 'none';
     if ($('fcMyDevicesBox')) $('fcMyDevicesBox').style.display = connected ? '' : 'none';
@@ -226,6 +228,7 @@
     }
     setStatus('Teléfono identificado. Selecciona tu perfil o vincula este dispositivo.', 'success');
     setText('fcDeviceUid', user.uid);
+    setText('fcGateUid', user.uid);
     if (selectedProfileRole) hideFirstProfileGate();
     watchOwnMembership();
     maybeProcessIncomingPair();
@@ -292,7 +295,12 @@
   async function createBand() {
     try {
       if (!currentUser || !db) throw new Error('El teléfono todavía no está identificado.');
-      if (currentUser.uid !== OWNER_UID) throw new Error('Este dispositivo no es el propietario técnico registrado. El perfil Acordeonista adicional debe vincularse mediante QR.');
+      if (currentUser.uid !== OWNER_UID) {
+        var mismatch = 'El UID actual de este teléfono no coincide con el propietario configurado. UID actual: ' + currentUser.uid + '. Copia este identificador y actualizaremos la regla de Firebase. Este primer dispositivo NO debe escanear un QR.';
+        setStatus(mismatch, 'warning');
+        alert(mismatch);
+        throw new Error(mismatch);
+      }
       if (selectedProfileRole !== 'accordionist') throw new Error('Selecciona Acordeonista para crear la banda como propietario técnico.');
       if (bandId) throw new Error('Este teléfono ya pertenece a la banda.');
       var name = $('fcBandName').value.trim() || 'Frecuencia Cero';
@@ -1126,7 +1134,7 @@
       var panel = document.createElement('section'); panel.id = 'fcSyncPanel'; panel.className = 'fc-sync-panel';
       panel.innerHTML = '<div class="fc-panel-head"><div><strong>Mi banda y sincronización</strong><p class="note">La primera vez eliges tu perfil. Después queda guardado en este dispositivo. El propietario técnico autoriza integrantes y cada músico puede vincular sus propias tablets o teléfonos mediante QR.</p></div><span class="fc-panel-icon">☁️</span></div>' +
         '<div id="fcSyncStatus" class="fc-status neutral">Conectando con Firebase…</div>' +
-        '<div class="fc-band-box"><strong>Mi perfil en Frecuencia Cero</strong><label class="fc-field-label" for="fcProfileSelect">Selecciona quién utiliza este teléfono</label><select id="fcProfileSelect"><option value="">Seleccionar perfil…</option><option value="voice1">Voz 1 · Hombre (Director)</option><option value="voice2">Voz 2 · Mujer</option><option value="bass">Bajista</option><option value="accordionist">Acordeonista</option><option value="drummer">Baterista</option><option value="keyboardist">Tecladista</option></select><button id="fcProfileSave" class="p">Guardar mi perfil</button><p id="fcBandSummary" class="note">Selecciona tu perfil para continuar.</p><label class="fc-field-label" for="fcBandName">Nombre de la banda</label><input id="fcBandName" placeholder="Frecuencia Cero" value="Frecuencia Cero"><button id="fcCreateBand" class="p" style="display:none">Crear banda como propietario técnico</button><button id="fcRequestJoin" class="p" style="display:none">Solicitar incorporación</button><p class="note">El Acordeonista es el propietario técnico del catálogo y los dispositivos. Voz 1 se incorpora como director musical y organiza los eventos. Cualquier integrante puede vincular sus propios dispositivos con QR.</p><div class="note">ID de este teléfono: <code id="fcDeviceUid">Preparando…</code> <button id="fcCopyUid" style="display:none">Copiar ID</button></div><button id="fcLinkDevice" class="p" style="display:none">▦ Vincular otro dispositivo con QR</button><div id="fcPairQrBox" class="fc-pair-box" style="display:none"></div><button id="fcScanDeviceLink" style="display:none">📷 Escanear QR para vincular este dispositivo</button><div id="fcPairScannerWrap" class="fc-pair-box" style="display:none"><div id="fcPairScanner"></div><p id="fcPairScannerStatus" class="note">Preparando cámara…</p><button type="button" id="fcPairScannerClose">Cerrar cámara</button></div></div>' +
+        '<div class="fc-band-box"><strong>Mi perfil en Frecuencia Cero</strong><label class="fc-field-label" for="fcProfileSelect">Selecciona quién utiliza este teléfono</label><select id="fcProfileSelect"><option value="">Seleccionar perfil…</option><option value="voice1">Voz 1 · Hombre (Director)</option><option value="voice2">Voz 2 · Mujer</option><option value="bass">Bajista</option><option value="accordionist">Acordeonista</option><option value="drummer">Baterista</option><option value="keyboardist">Tecladista</option></select><button id="fcProfileSave" class="p">Guardar mi perfil</button><p id="fcBandSummary" class="note">Selecciona tu perfil para continuar.</p><label class="fc-field-label" for="fcBandName">Nombre de la banda</label><input id="fcBandName" placeholder="Frecuencia Cero" value="Frecuencia Cero"><button id="fcCreateBand" class="p" style="display:none">Crear banda como propietario técnico</button><div id="fcOwnerMismatch" class="fc-pair-box" style="display:none"><strong>Este parece ser el primer dispositivo, pero el UID no coincide con el propietario configurado.</strong><p class="note">No necesitas QR para iniciar la banda. Copia este ID actual y actualizaremos la autorización de Firebase.</p><code id="fcCurrentOwnerUid"></code><button type="button" id="fcCopyCurrentOwnerUid">Copiar ID actual</button></div><button id="fcRequestJoin" class="p" style="display:none">Solicitar incorporación</button><p class="note">El primer teléfono del Acordeonista crea la banda como propietario técnico. Si el UID no coincide con el autorizado, copia el ID actual y actualizaremos la regla; no uses QR para el primer teléfono. Voz 1 dirige los eventos. Cada integrante puede vincular otros dispositivos mediante QR.</p><div class="note">ID de este teléfono: <code id="fcDeviceUid">Preparando…</code> <button id="fcCopyUid" style="display:none">Copiar ID</button></div><button id="fcLinkDevice" class="p" style="display:none">▦ Vincular otro dispositivo con QR</button><div id="fcPairQrBox" class="fc-pair-box" style="display:none"></div><button id="fcScanDeviceLink" style="display:none">📷 Escanear QR para vincular este dispositivo</button><div id="fcPairScannerWrap" class="fc-pair-box" style="display:none"><div id="fcPairScanner"></div><p id="fcPairScannerStatus" class="note">Preparando cámara…</p><button type="button" id="fcPairScannerClose">Cerrar cámara</button></div></div>' +
         '<div id="fcJoinRequests" class="fc-member-admin" style="display:none"><div class="fc-member-head"><strong>Solicitudes de integrantes</strong></div><div id="fcJoinRequestsList"></div></div>' +
         '<div id="fcMemberAdmin" class="fc-member-admin" style="display:none"><div class="fc-member-head"><strong>Integrantes y funciones (6 plazas)</strong><span id="fcOnlineCount" class="note"></span></div><p class="note">El propietario técnico administra el catálogo, integrantes y dispositivos. Voz 1 dirige los eventos y puede crear y organizar repertorios. Cada función se asigna a una sola persona.</p><div id="fcMembers"></div></div>' +
         '<div id="fcMyDevicesBox" class="fc-member-admin" style="display:none"><div class="fc-member-head"><strong>Mis dispositivos vinculados</strong></div><p class="note">Puedes vincular varios teléfonos o tablets a tu mismo perfil y revocar los que ya no utilices.</p><div id="fcMyDevices"></div></div>' +
@@ -1135,22 +1143,19 @@
     }
     if (!$('fcFirstProfileGate')) {
       var gate = document.createElement('div'); gate.id = 'fcFirstProfileGate'; gate.className = 'fc-profile-gate'; gate.style.display = 'none';
-      gate.innerHTML = '<div class="fc-profile-card"><div class="fc-profile-brand">♫</div><strong class="fc-profile-title">Frecuencia Cero</strong><p class="note">Primera configuración: selecciona quién utiliza este dispositivo. Se guardará para las próximas veces.</p><div class="fc-profile-grid"><button data-role="voice1"><b>🎤 Voz 1</b><small>Director musical</small></button><button data-role="voice2"><b>🎤 Voz 2</b><small>Cantante</small></button><button data-role="bass"><b>🎸 Bajista</b><small>Acordes</small></button><button data-role="accordionist"><b>🪗 Acordeonista</b><small>Acordeón / guitarra</small></button><button data-role="drummer"><b>🥁 Baterista</b><small>Seguimiento</small></button><button data-role="keyboardist"><b>🎹 Tecladista</b><small>Teclado / guitarra</small></button></div><p class="note fc-profile-foot">Si este es un segundo dispositivo, utiliza la vinculación QR desde tu dispositivo ya autorizado.</p><button type="button" id="fcProfileGateQr">Ya tengo un QR para vincular</button></div>';
+      gate.innerHTML = '<div class="fc-profile-card"><div class="fc-profile-brand">♫</div><strong class="fc-profile-title">Frecuencia Cero</strong><p class="note">Primera configuración: selecciona quién utiliza este dispositivo. Se guardará para las próximas veces.</p><div class="fc-profile-grid"><button data-role="voice1"><b>🎤 Voz 1</b><small>Director musical</small></button><button data-role="voice2"><b>🎤 Voz 2</b><small>Cantante</small></button><button data-role="bass"><b>🎸 Bajista</b><small>Acordes</small></button><button data-role="accordionist"><b>🪗 Acordeonista</b><small>Acordeón / guitarra</small></button><button data-role="drummer"><b>🥁 Baterista</b><small>Seguimiento</small></button><button data-role="keyboardist"><b>🎹 Tecladista</b><small>Teclado / guitarra</small></button></div><p class="note fc-profile-foot">Si es tu primer dispositivo, elige tu perfil. Si es un segundo dispositivo, utiliza el QR de un dispositivo ya autorizado.</p><div class="note">ID de este teléfono: <code id="fcGateUid">Preparando…</code> <button type="button" id="fcGateCopyUid">Copiar ID</button></div><button type="button" id="fcProfileGateQr">Ya tengo un QR para vincular</button></div>';
       document.body.appendChild(gate);
       Array.prototype.forEach.call(gate.querySelectorAll('[data-role]'), function (button) {
         button.onclick = function () {
           var role = button.dataset.role;
-          if (role === 'accordionist' && currentUser && currentUser.uid !== OWNER_UID) {
-            alert('El perfil Acordeonista está reservado al propietario técnico. Si es tu propio segundo dispositivo, utiliza “Ya tengo un QR para vincular”.');
-            return;
-          }
           selectedProfileRole = role; localStorage.setItem(PROFILE_KEY, role);
           hideFirstProfileGate(); updateSyncButtons();
-          setStatus('Perfil guardado: ' + roleName(role) + '. Completa la incorporación en Más → Mi banda y sincronización.', 'success');
+          setStatus(role === 'accordionist' && currentUser && currentUser.uid !== OWNER_UID ? 'Perfil Acordeonista seleccionado. No escanees QR: copia el UID actual en Más → Mi banda y sincronización para ajustar la autorización inicial.' : 'Perfil guardado: ' + roleName(role) + '. Completa la incorporación en Más → Mi banda y sincronización.', role === 'accordionist' && currentUser && currentUser.uid !== OWNER_UID ? 'warning' : 'success');
           if (typeof window.show === 'function') window.show('vm');
         };
       });
       var gateQr = $('fcProfileGateQr'); if (gateQr) gateQr.onclick = function () { hideFirstProfileGate(); if (typeof window.show === 'function') window.show('vm'); setTimeout(function () { if ($('fcScanDeviceLink')) $('fcScanDeviceLink').click(); }, 250); };
+      var gateCopy = $('fcGateCopyUid'); if (gateCopy) gateCopy.onclick = function () { var uid = currentUser && currentUser.uid || ''; if (!uid) return; if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(uid).then(function () { alert('ID copiado: ' + uid); }).catch(function () { alert('ID de este teléfono: ' + uid); }); else alert('ID de este teléfono: ' + uid); };
     }
     if (!$('fcMiniPlayer')) {
       var mini = document.createElement('aside'); mini.id = 'fcMiniPlayer'; mini.className = 'fc-mini-player'; mini.style.display = 'none';
@@ -1186,7 +1191,6 @@
     if ($('fcProfileSave')) $('fcProfileSave').onclick = function () {
       var role = $('fcProfileSelect').value;
       if (!role) { alert('Selecciona una función.'); return; }
-      if (role === 'accordionist' && currentUser && currentUser.uid !== OWNER_UID) { alert('Acordeonista está reservado al propietario técnico. Para un segundo dispositivo, utiliza QR.'); return; }
       if (isConnected()) { alert('Tu función ya fue asignada por el propietario técnico. Para cambiarla, solicita que actualice tu perfil.'); return; }
       selectedProfileRole = role; localStorage.setItem(PROFILE_KEY, role);
       hideFirstProfileGate();
@@ -1199,6 +1203,11 @@
       if (!uid) return;
       if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(uid).then(function () { setStatus('ID de este dispositivo copiado.', 'success'); });
       else { setStatus('ID del teléfono: ' + uid, 'neutral'); }
+    };
+    if ($('fcCopyCurrentOwnerUid')) $('fcCopyCurrentOwnerUid').onclick = function () {
+      var uid = currentUser && currentUser.uid || ''; if (!uid) return;
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(uid).then(function () { setStatus('UID actual copiado. Envíalo para actualizar la regla del propietario.', 'success'); }).catch(function () { alert('UID actual: ' + uid); });
+      else alert('UID actual: ' + uid);
     };
     profileButtonActions();
     if ($('fcMiniReturn')) $('fcMiniReturn').onclick = returnToLive;
@@ -1235,6 +1244,7 @@
     if (window.firebase) connectFirebase();
     else setStatus('Firebase no se ha cargado. Comprueba Internet y vuelve a abrir la página.', 'error');
     if ($('fcProfileSelect') && selectedProfileRole) $('fcProfileSelect').value = selectedProfileRole;
+    if (currentUser) { setText('fcGateUid', currentUser.uid); setText('fcCurrentOwnerUid', currentUser.uid); }
     if (selectedProfileRole) hideFirstProfileGate();
     updateSyncButtons();
   }
