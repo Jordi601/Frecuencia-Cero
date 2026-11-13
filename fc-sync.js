@@ -8,6 +8,8 @@
   var BAND_KEY = 'fc_band_id_v1';
   var PROFILE_KEY = 'fc_device_profile_v1';
   var FIXED_BAND_ID = 'frecuencia-cero-main';
+  // UID anónimo del dispositivo principal del propietario técnico (Acordeonista).
+  var OWNER_UID = 'qZCvhHTK3MUhcABIlZlRyrqHKdC2';
   var FIREBASE_CONFIG = {
     apiKey: 'AIzaSyBqpgzZ-z7hBzY3E1SlnL4YaCMaKqI7qD8',
     authDomain: 'frecuencia-cerov1.firebaseapp.com',
@@ -77,6 +79,12 @@
   var pairQrExpiryTimer = null;
   var pairScanner = null;
   var pairProcessing = false;
+  var browseOverride = false;
+  var openingFromLive = false;
+  var lastRemotePositionKey = '';
+  var lastPublishedPositionKey = '';
+  var scrollPublishTimer = null;
+  var firstProfileGateShown = false;
 
   function $(id) { return document.getElementById(id); }
   function safeJson(value) { try { return JSON.stringify(value); } catch (e) { return '{}'; } }
@@ -92,8 +100,13 @@
   }
   function setText(id, value) { var node = $(id); if (node) node.textContent = value; }
   function isConnected() { return !!(db && auth && currentUser && bandId); }
-  function isDirector() { return isConnected() ? memberRole === 'voice1' : !currentUser; }
-  function isTechnicalOwner() { if (!currentUser || !memberProfile) return false; var ownerUid = bandMeta && bandMeta.ownerUid; var memberUid = memberProfile.memberUid || currentUser.uid; return !!(memberProfile.isOwner || memberRole === 'accordionist' || (ownerUid && memberUid === ownerUid)); }
+  function isDirector() { return isConnected() ? memberRole === 'voice1' : false; }
+  function isTechnicalOwner() {
+    if (!currentUser) return false;
+    var ownerUid = bandMeta && bandMeta.ownerUid;
+    var memberUid = memberProfile && (memberProfile.memberUid || currentUser.uid);
+    return currentUser.uid === OWNER_UID || !!(memberProfile && memberProfile.isOwner) || !!(ownerUid && (currentUser.uid === ownerUid || memberUid === ownerUid)) || memberUid === OWNER_UID;
+  }
   function canManageCatalog() { return !isConnected() || isTechnicalOwner(); }
   function canManageEvents() { return !isConnected() || isTechnicalOwner() || memberRole === 'voice1'; }
   function roleName(role) { return ROLE_LABELS[role] || 'Integrante'; }
@@ -140,13 +153,13 @@
     if ($('fcProfileSave')) $('fcProfileSave').style.display = connected ? 'none' : '';
     if ($('fcDeviceUid')) $('fcDeviceUid').textContent = currentUser ? currentUser.uid : 'Preparando identidad de este teléfono…';
     if ($('fcCopyUid')) $('fcCopyUid').style.display = currentUser && !connected ? '' : 'none';
-    if ($('fcCreateBand')) $('fcCreateBand').style.display = (!connected && selectedProfileRole === 'accordionist') ? '' : 'none';
-    if ($('fcCreateBand')) $('fcCreateBand').disabled = !signed || connected;
+    if ($('fcCreateBand')) $('fcCreateBand').style.display = (!connected && selectedProfileRole === 'accordionist' && currentUser && currentUser.uid === OWNER_UID) ? '' : 'none';
+    if ($('fcCreateBand')) $('fcCreateBand').disabled = !signed || connected || !currentUser || currentUser.uid !== OWNER_UID;
     if ($('fcRequestJoin')) $('fcRequestJoin').style.display = (!connected && selectedProfileRole && selectedProfileRole !== 'accordionist') ? '' : 'none';
     if ($('fcRequestJoin')) $('fcRequestJoin').disabled = !signed || !!(window.fcJoinRequestPending);
     if ($('fcLinkDevice')) $('fcLinkDevice').style.display = connected ? '' : 'none';
     if ($('fcScanDeviceLink')) $('fcScanDeviceLink').style.display = (!connected && signed) ? '' : 'none';
-    if ($('fcBandName')) $('fcBandName').style.display = (!connected && selectedProfileRole === 'accordionist') ? '' : 'none';
+    if ($('fcBandName')) $('fcBandName').style.display = (!connected && selectedProfileRole === 'accordionist' && currentUser && currentUser.uid === OWNER_UID) ? '' : 'none';
     if ($('fcBandSummary')) $('fcBandSummary').textContent = connected ? ((bandMeta && bandMeta.name) || 'Frecuencia Cero') + ' · ' + roleName(memberRole) : (window.fcJoinRequestPending ? 'Solicitud enviada. Esperando aprobación del propietario técnico.' : 'Selecciona tu perfil en este teléfono.');
     if ($('fcBandActions')) $('fcBandActions').style.display = connected ? '' : 'none';
     if ($('fcMemberAdmin')) $('fcMemberAdmin').style.display = connected && isTechnicalOwner() ? '' : 'none';
@@ -156,6 +169,7 @@
     var profileBar = $('fcRoleBar');
     if (profileBar) profileBar.style.display = (connected && memberRole !== 'pending') ? '' : 'none';
     if ($('fcDirectorButton')) $('fcDirectorButton').style.display = memberRole === 'voice1' ? '' : 'none';
+    if ($('fcProfileSelect') && connected) $('fcProfileSelect').style.display = 'none';
     if ($('eventNew')) $('eventNew').style.display = connected && !canManageEvents() ? 'none' : '';
     var legacyImport = document.querySelector('.event-import'); if (legacyImport) legacyImport.style.display = connected ? 'none' : '';
     if ($('mimp')) $('mimp').style.display = connected && !canManageCatalog() ? 'none' : '';
@@ -212,6 +226,7 @@
     }
     setStatus('Teléfono identificado. Selecciona tu perfil o vincula este dispositivo.', 'success');
     setText('fcDeviceUid', user.uid);
+    if (selectedProfileRole) hideFirstProfileGate();
     watchOwnMembership();
     maybeProcessIncomingPair();
     updateSyncButtons();
@@ -225,6 +240,7 @@
     selectedProfileRole = profile.role; localStorage.setItem(PROFILE_KEY, profile.role);
     window.fcJoinRequestPending = false;
     if (attachedUid !== id) attachBand(FIXED_BAND_ID, kind);
+    hideFirstProfileGate();
     setStatus('Conectado · ' + roleName(memberRole) + (kind === 'devices' ? ' · dispositivo vinculado' : ''), 'success');
     updateSyncButtons();
   }
@@ -271,10 +287,12 @@
     memberRole = window.fcJoinRequestPending ? 'pending' : 'unjoined';
     identityKind = 'members';
     updateSyncButtons();
+    maybeShowFirstProfileGate();
   }
   async function createBand() {
     try {
       if (!currentUser || !db) throw new Error('El teléfono todavía no está identificado.');
+      if (currentUser.uid !== OWNER_UID) throw new Error('Este dispositivo no es el propietario técnico registrado. El perfil Acordeonista adicional debe vincularse mediante QR.');
       if (selectedProfileRole !== 'accordionist') throw new Error('Selecciona Acordeonista para crear la banda como propietario técnico.');
       if (bandId) throw new Error('Este teléfono ya pertenece a la banda.');
       var name = $('fcBandName').value.trim() || 'Frecuencia Cero';
@@ -285,7 +303,7 @@
         meta: { name: name, ownerUid: currentUser.uid, createdAt: now, schema: 3, authMode: 'anonymous', ownerRole: 'accordionist', directorRole: 'voice1' },
         members: {}, devices: {}, devicePairings: {},
         catalog: mapById(window.songs || []), events: initialEvents,
-        live: { eventId: null, songId: null, position: -1, changedAt: now, changedBy: currentUser.uid }
+        live: { eventId: null, songId: null, position: -1, rowIndex: 0, chordIndex: -1, paused: true, changedAt: now, changedBy: currentUser.uid }
       };
       initial.members[currentUser.uid] = { role: 'accordionist', name: ROLE_LABELS.accordionist, memberUid: currentUser.uid, isOwner: true, joinedAt: now, deviceType: 'anonymous' };
       await db.ref('bands/' + FIXED_BAND_ID).set(initial);
@@ -384,6 +402,8 @@
       localSaveSongs(); applyingRemote = false;
       if (typeof window.render === 'function') window.render();
       if (window.cur) { var latest = window.find(window.cur.id); if (latest) { window.cur = latest; window.paint(); applyRoleToCurrentSong(); } }
+      // Reintenta el seguimiento si el listener de live llegó antes que el catálogo.
+      renderLiveBanner(); handleLiveUpdate();
     });
     refs.events.on('value', function (snap) {
       var data = snap.val(); if (!data) data = {};
@@ -394,6 +414,8 @@
       if (typeof window.renderEvents === 'function') window.renderEvents();
       if (window.currentEventId && $('vplaylist') && $('vplaylist').classList.contains('on')) window.renderEventPlaylist();
       if (window.cur) applyRoleToCurrentSong();
+      // Reintenta cuando los eventos ya están disponibles localmente.
+      renderLiveBanner(); handleLiveUpdate();
     });
     refs.live.on('value', function (snap) { liveState = snap.val() || null; renderLiveBanner(); handleLiveUpdate(); });
     refs.presence.set({ name: roleName(memberRole), role: memberRole, online: true, since: firebase.database.ServerValue.TIMESTAMP }).catch(function () {});
@@ -746,7 +768,7 @@
     bar.style.display = '';
     setText('fcRoleDescription', roleName(memberRole) + (instrument ? ' · ' + (instrument === 'guitar' ? 'Guitarra' : instrument === 'accordion' ? 'Acordeón' : 'Teclado') : ''));
     var followBtn = $('fcFollowToggle');
-    if (followBtn) { followBtn.style.display = (memberRole === 'voice1') ? 'none' : ''; followBtn.textContent = followDirector ? 'Siguiendo director' : 'Vista libre'; }
+    if (followBtn) { followBtn.style.display = (memberRole === 'voice1') ? 'none' : ''; followBtn.textContent = followDirector && !browseOverride ? 'Siguiendo director' : 'Vista libre'; }
     var select = $('fcInstrumentSelect');
     if (!select) return;
     var musicianRole = memberRole === 'accordionist' || memberRole === 'keyboardist';
@@ -767,30 +789,153 @@
     banner.style.display = '';
     setText('fcLiveBannerText', 'EN VIVO · ' + ev.name + ' · ' + s.title);
   }
+  function cleanLiveLine(song, rowIndex) {
+    if (!song) return '';
+    var lines = String(song.text || '').split(/\r?\n/);
+    var i = Math.max(0, Math.min(Number(rowIndex) || 0, Math.max(0, lines.length - 1)));
+    var text = String(lines[i] || '').replace(/\[[^\]]+\]/g, '').replace(/^##\s*/, '').trim();
+    if (!text) {
+      for (var j = i + 1; j < lines.length; j++) {
+        text = String(lines[j] || '').replace(/\[[^\]]+\]/g, '').replace(/^##\s*/, '').trim();
+        if (text) break;
+      }
+    }
+    return text || 'Parte instrumental';
+  }
+  function renderMiniPlayer() {
+    var mini = $('fcMiniPlayer');
+    if (!mini) return;
+    var song = liveState && liveState.songId ? window.find(liveState.songId) : null;
+    var ev = liveState && liveState.eventId ? (window.events || []).find(function (x) { return x.id === liveState.eventId; }) : null;
+    if (!isConnected() || !song || !ev) { mini.style.display = 'none'; return; }
+    mini.style.display = 'flex';
+    setText('fcMiniEvent', ev.name || 'Evento en vivo');
+    setText('fcMiniSong', song.title || 'Canción actual');
+    setText('fcMiniLine', cleanLiveLine(song, liveState.rowIndex));
+    var lines = String(song.text || '').split(/\r?\n/);
+    var current = Math.min(lines.length || 1, Math.max(1, (Number(liveState.rowIndex) || 0) + 1));
+    var pct = Math.round(current / Math.max(1, lines.length) * 100);
+    var progress = $('fcMiniProgress');
+    if (progress) progress.style.width = pct + '%';
+    setText('fcMiniProgressText', current + '/' + Math.max(1, lines.length));
+    var modeLabel = memberRole === 'voice1' ? 'DIRECTOR' : (!followDirector || browseOverride ? 'VISTA LIBRE' : 'EN SINCRONÍA');
+    setText('fcMiniMode', modeLabel);
+    var action = $('fcMiniReturn');
+    if (action) {
+      action.textContent = memberRole === 'voice1' ? 'Abrir' : (!followDirector || browseOverride ? 'Volver a sincronía' : 'Ver en vivo');
+      action.style.display = '';
+    }
+    var paused = !!liveState.paused;
+    setText('fcMiniState', paused ? 'En pausa' : 'Avanzando');
+    mini.classList.toggle('is-free', memberRole !== 'voice1' && (!followDirector || browseOverride));
+    mini.classList.toggle('is-paused', paused);
+  }
+  function renderLiveBanner() {
+    var banner = $('fcLiveBanner');
+    if (banner) {
+      if (!liveState || !liveState.eventId || !liveState.songId) banner.style.display = 'none';
+      else {
+        var ev = (window.events || []).find(function (item) { return item.id === liveState.eventId; });
+        var s = window.find(liveState.songId);
+        if (!ev || !s) banner.style.display = 'none';
+        else { banner.style.display = ''; setText('fcLiveBannerText', 'EN VIVO · ' + ev.name + ' · ' + s.title); }
+      }
+    }
+    renderMiniPlayer();
+  }
+  function applyLivePosition() {
+    if (!liveState || !window.cur || window.cur.id !== liveState.songId || !$('vr') || !$('vr').classList.contains('on')) return;
+    var rowIndex = Math.max(0, Number(liveState.rowIndex) || 0);
+    if (window.mode === 'b' && window.bassEvents && window.bassEvents.length) {
+      var chordIndex = Number(liveState.chordIndex);
+      if (chordIndex < 0) {
+        chordIndex = window.bassEvents.findIndex(function (item) { return item.line && Number(item.line.dataset.lineIndex) === rowIndex; });
+      }
+      if (chordIndex >= 0 && window.setActiveBassEvent) { window.setActiveBassEvent(Math.min(chordIndex, window.bassEvents.length - 1), true); return; }
+    }
+    var target = $('rt') && $('rt').querySelector('[data-line-index="' + rowIndex + '"]');
+    if (!target) return;
+    Array.prototype.forEach.call($('rt').querySelectorAll('[data-line-index]'), function (el) { el.classList.toggle('fc-live-row-current', el === target); });
+    var rd = $('rd'), r = target.getBoundingClientRect(), container = rd.getBoundingClientRect();
+    var top = rd.scrollTop + (r.top - container.top) - Math.max(25, rd.clientHeight * .28);
+    rd.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+  }
   function handleLiveUpdate() {
     if (!liveState || !liveState.eventId || !liveState.songId) { renderLiveBanner(); return; }
     renderLiveBanner();
-    if (memberRole === 'voice1' || !followDirector) return;
+    if (memberRole === 'voice1') return;
     var s = window.find(liveState.songId); if (!s) return;
-    var changed = lastHandledSong !== liveState.eventId + ':' + liveState.songId;
+    var songKey = liveState.eventId + ':' + liveState.songId;
+    var remotePositionKey = songKey + ':' + (liveState.rowIndex == null ? 0 : liveState.rowIndex) + ':' + (liveState.chordIndex == null ? -1 : liveState.chordIndex) + ':' + (!!liveState.paused);
+    var changedSong = lastHandledSong !== songKey;
     window.currentEventId = liveState.eventId;
     if ($('vplaylist') && $('vplaylist').classList.contains('on')) window.renderEventPlaylist();
     var editing = ($('ve') && $('ve').classList.contains('on')) || ($('vset') && $('vset').classList.contains('on')) || ($('vm') && $('vm').classList.contains('on'));
-    var alreadyOnLiveSong = window.cur && window.cur.id === liveState.songId && window.currentEventId === liveState.eventId && $('vr') && $('vr').classList.contains('on');
-    if (!editing && !alreadyOnLiveSong) {
-      lastHandledSong = liveState.eventId + ':' + liveState.songId;
+    if (!followDirector || browseOverride || editing) { renderMiniPlayer(); return; }
+    var alreadyOnLiveSong = window.cur && window.cur.id === liveState.songId && $('vr') && $('vr').classList.contains('on');
+    if (changedSong || !alreadyOnLiveSong) {
+      lastHandledSong = songKey;
+      openingFromLive = true;
       window.openSong(liveState.songId, 'vplaylist');
+      openingFromLive = false;
+    }
+    if (remotePositionKey !== lastRemotePositionKey || changedSong) {
+      lastRemotePositionKey = remotePositionKey;
+      window.requestAnimationFrame(function () { applyLivePosition(); renderMiniPlayer(); });
     }
     applyRoleToCurrentSong();
   }
   async function setLiveSong(eventId, songId, index) {
     if (memberRole !== 'voice1' || !db || !bandId) { alert('Solo Voz 1 · Director puede cambiar la canción compartida.'); return; }
     try {
-      await db.ref(bandPath('live')).set({ eventId: eventId, songId: songId, position: index, changedAt: firebase.database.ServerValue.TIMESTAMP, changedBy: currentUser.uid, changedByName: currentUser.displayName || 'Voz 1' });
-      liveState = { eventId: eventId, songId: songId, position: index, changedBy: currentUser.uid };
-      window.currentEventId = eventId; lastHandledSong = eventId + ':' + songId;
+      var payload = { eventId: eventId, songId: songId, position: index, rowIndex: 0, chordIndex: -1, paused: true, changedAt: firebase.database.ServerValue.TIMESTAMP, changedBy: currentUser.uid, changedByName: currentUser.displayName || 'Voz 1' };
+      await db.ref(bandPath('live')).set(payload);
+      liveState = Object.assign({}, payload, { changedAt: Date.now() });
+      window.currentEventId = eventId; lastHandledSong = eventId + ':' + songId; lastRemotePositionKey = '';
+      lastPublishedPositionKey = '';
       renderEventPlaylist(); renderLiveBanner();
     } catch (err) { setStatus('No se pudo actualizar la canción en vivo: ' + err.message, 'error'); }
+  }
+  function publishLivePosition(rowIndex, chordIndex, paused) {
+    if (memberRole !== 'voice1' || !db || !bandId || !liveState || !window.cur || liveState.songId !== window.cur.id) return;
+    rowIndex = Math.max(0, Number(rowIndex) || 0);
+    chordIndex = chordIndex == null ? -1 : Number(chordIndex);
+    var key = liveState.eventId + ':' + liveState.songId + ':' + rowIndex + ':' + chordIndex + ':' + (!!paused);
+    if (key === lastPublishedPositionKey) return;
+    lastPublishedPositionKey = key;
+    var patch = { rowIndex: rowIndex, chordIndex: chordIndex, paused: !!paused, positionChangedAt: firebase.database.ServerValue.TIMESTAMP };
+    Object.assign(liveState, { rowIndex: rowIndex, chordIndex: chordIndex, paused: !!paused, positionChangedAt: Date.now() });
+    renderMiniPlayer();
+    db.ref(bandPath('live')).update(patch).catch(function (err) { setStatus('No se pudo sincronizar el renglón: ' + err.message, 'error'); });
+  }
+  function syncDirectorRowFromScroll() {
+    if (memberRole !== 'voice1' || !liveState || !window.cur || liveState.songId !== window.cur.id || window.mode !== 's' || !$('vr') || !$('vr').classList.contains('on')) return;
+    var rd = $('rd'), children = $('rt') ? Array.prototype.slice.call($('rt').children) : [];
+    if (!children.length) return;
+    var anchor = rd.getBoundingClientRect().top + Math.max(24, rd.clientHeight * .30), rowIndex = 0;
+    children.forEach(function (el) {
+      var line = Number(el.dataset.lineIndex);
+      if (Number.isFinite(line) && el.getBoundingClientRect().top <= anchor) rowIndex = line;
+    });
+    publishLivePosition(rowIndex, -1, !window.scrollFrame);
+  }
+  window.fcSyncPositionChanged = function (rowIndex, chordIndex) {
+    if (memberRole !== 'voice1') return;
+    publishLivePosition(rowIndex, chordIndex, !window.chordTimer);
+  };
+  function returnToLive() {
+    if (!liveState || !liveState.eventId || !liveState.songId) return;
+    followDirector = true; browseOverride = false;
+    localStorage.setItem(FOLLOW_KEY, 'true');
+    if ($('fcFollow')) $('fcFollow').checked = true;
+    window.currentEventId = liveState.eventId;
+    var ev = window.findEvent(liveState.eventId);
+    if (ev) window.openEvent(liveState.eventId);
+    openingFromLive = true;
+    window.openSong(liveState.songId, 'vplaylist');
+    openingFromLive = false;
+    window.requestAnimationFrame(function () { applyLivePosition(); renderMiniPlayer(); });
+    renderMiniPlayer();
   }
   function updateMemberPresence() {
     Object.keys(memberList || {}).forEach(function (uid) {
@@ -831,13 +976,20 @@
     }
   };
   window.openSong = function (id, backTo) {
+    if (!openingFromLive && memberRole !== 'voice1' && liveState && liveState.songId) {
+      if (id !== liveState.songId) browseOverride = true;
+      else browseOverride = false;
+    }
     if (typeof originalOpenSong === 'function') originalOpenSong(id, backTo);
     applyRoleToCurrentSong();
+    renderMiniPlayer();
   };
   window.show = function (id) {
     if (typeof originalShow === 'function') originalShow(id);
+    document.body.classList.toggle('fc-reader-open', id === 'vr');
     if (id === 'vm') updateSyncButtons();
     else if (id === 'vl' || id === 'vse' || id === 'vplaylist' || id === 'vr') setTimeout(handleLiveUpdate, 0);
+    renderMiniPlayer();
   };
 
   // Editor de evento: asignación independiente por canción para acordeonista y tecladista.
@@ -952,15 +1104,27 @@
       instrumentOverrides[key] = this.value; localStorage.setItem(OVERRIDE_KEY, safeJson(instrumentOverrides));
       applyRoleToCurrentSong();
     };
-    if ($('fcFollow')) $('fcFollow').onchange = function () { followDirector = this.checked; localStorage.setItem(FOLLOW_KEY, String(followDirector)); renderRoleBar(effectiveInstrument(window.cur && window.cur.id)); if (followDirector) handleLiveUpdate(); };
-    if ($('fcFollowToggle')) $('fcFollowToggle').onclick = function () { followDirector = !followDirector; localStorage.setItem(FOLLOW_KEY, String(followDirector)); if ($('fcFollow')) $('fcFollow').checked = followDirector; renderRoleBar(effectiveInstrument(window.cur && window.cur.id)); if (followDirector) handleLiveUpdate(); };
+    if ($('fcFollow')) $('fcFollow').onchange = function () { followDirector = this.checked; browseOverride = !followDirector; localStorage.setItem(FOLLOW_KEY, String(followDirector)); renderRoleBar(effectiveInstrument(window.cur && window.cur.id)); if (followDirector) returnToLive(); else renderMiniPlayer(); };
+    if ($('fcFollowToggle')) $('fcFollowToggle').onclick = function () { followDirector = !followDirector; browseOverride = !followDirector; localStorage.setItem(FOLLOW_KEY, String(followDirector)); if ($('fcFollow')) $('fcFollow').checked = followDirector; renderRoleBar(effectiveInstrument(window.cur && window.cur.id)); if (followDirector) returnToLive(); else renderMiniPlayer(); };
     if ($('fcDirectorButton')) $('fcDirectorButton').onclick = function () { if (!window.cur || !window.currentEventId) { alert('Abre primero la canción desde una carpeta de evento.'); return; } var ev = window.findEvent(window.currentEventId); var index = ev ? ev.songIds.indexOf(window.cur.id) : -1; if (index >= 0) setLiveSong(ev.id, window.cur.id, index); };
+  }
+  function hideFirstProfileGate() {
+    var gate = $('fcFirstProfileGate');
+    if (gate) gate.style.display = 'none';
+  }
+  function maybeShowFirstProfileGate() {
+    if (selectedProfileRole || memberProfile || !currentUser || firstProfileGateShown) return;
+    try { if (new URL(window.location.href).searchParams.get('fc_pair')) return; } catch (e) {}
+    var gate = $('fcFirstProfileGate');
+    if (!gate) return;
+    firstProfileGateShown = true;
+    gate.style.display = 'grid';
   }
   function initUi() {
     var menu = document.querySelector('#vm .menu-content');
     if (menu && !$('fcSyncPanel')) {
       var panel = document.createElement('section'); panel.id = 'fcSyncPanel'; panel.className = 'fc-sync-panel';
-      panel.innerHTML = '<div class="fc-panel-head"><div><strong>Mi banda y sincronización</strong><p class="note">Cada teléfono tiene una identidad anónima. El propietario técnico autoriza cada integrante; cada integrante puede vincular sus propios dispositivos mediante QR.</p></div><span class="fc-panel-icon">☁️</span></div>' +
+      panel.innerHTML = '<div class="fc-panel-head"><div><strong>Mi banda y sincronización</strong><p class="note">La primera vez eliges tu perfil. Después queda guardado en este dispositivo. El propietario técnico autoriza integrantes y cada músico puede vincular sus propias tablets o teléfonos mediante QR.</p></div><span class="fc-panel-icon">☁️</span></div>' +
         '<div id="fcSyncStatus" class="fc-status neutral">Conectando con Firebase…</div>' +
         '<div class="fc-band-box"><strong>Mi perfil en Frecuencia Cero</strong><label class="fc-field-label" for="fcProfileSelect">Selecciona quién utiliza este teléfono</label><select id="fcProfileSelect"><option value="">Seleccionar perfil…</option><option value="voice1">Voz 1 · Hombre (Director)</option><option value="voice2">Voz 2 · Mujer</option><option value="bass">Bajista</option><option value="accordionist">Acordeonista</option><option value="drummer">Baterista</option><option value="keyboardist">Tecladista</option></select><button id="fcProfileSave" class="p">Guardar mi perfil</button><p id="fcBandSummary" class="note">Selecciona tu perfil para continuar.</p><label class="fc-field-label" for="fcBandName">Nombre de la banda</label><input id="fcBandName" placeholder="Frecuencia Cero" value="Frecuencia Cero"><button id="fcCreateBand" class="p" style="display:none">Crear banda como propietario técnico</button><button id="fcRequestJoin" class="p" style="display:none">Solicitar incorporación</button><p class="note">El Acordeonista es el propietario técnico del catálogo y los dispositivos. Voz 1 se incorpora como director musical y organiza los eventos. Cualquier integrante puede vincular sus propios dispositivos con QR.</p><div class="note">ID de este teléfono: <code id="fcDeviceUid">Preparando…</code> <button id="fcCopyUid" style="display:none">Copiar ID</button></div><button id="fcLinkDevice" class="p" style="display:none">▦ Vincular otro dispositivo con QR</button><div id="fcPairQrBox" class="fc-pair-box" style="display:none"></div><button id="fcScanDeviceLink" style="display:none">📷 Escanear QR para vincular este dispositivo</button><div id="fcPairScannerWrap" class="fc-pair-box" style="display:none"><div id="fcPairScanner"></div><p id="fcPairScannerStatus" class="note">Preparando cámara…</p><button type="button" id="fcPairScannerClose">Cerrar cámara</button></div></div>' +
         '<div id="fcJoinRequests" class="fc-member-admin" style="display:none"><div class="fc-member-head"><strong>Solicitudes de integrantes</strong></div><div id="fcJoinRequestsList"></div></div>' +
@@ -968,6 +1132,30 @@
         '<div id="fcMyDevicesBox" class="fc-member-admin" style="display:none"><div class="fc-member-head"><strong>Mis dispositivos vinculados</strong></div><p class="note">Puedes vincular varios teléfonos o tablets a tu mismo perfil y revocar los que ya no utilices.</p><div id="fcMyDevices"></div></div>' +
         '<label class="fc-follow-row"><input type="checkbox" id="fcFollow" checked> Seguir automáticamente la canción que elija Voz 1</label>';
       var insertion = $('mi'); menu.insertBefore(panel, insertion);
+    }
+    if (!$('fcFirstProfileGate')) {
+      var gate = document.createElement('div'); gate.id = 'fcFirstProfileGate'; gate.className = 'fc-profile-gate'; gate.style.display = 'none';
+      gate.innerHTML = '<div class="fc-profile-card"><div class="fc-profile-brand">♫</div><strong class="fc-profile-title">Frecuencia Cero</strong><p class="note">Primera configuración: selecciona quién utiliza este dispositivo. Se guardará para las próximas veces.</p><div class="fc-profile-grid"><button data-role="voice1"><b>🎤 Voz 1</b><small>Director musical</small></button><button data-role="voice2"><b>🎤 Voz 2</b><small>Cantante</small></button><button data-role="bass"><b>🎸 Bajista</b><small>Acordes</small></button><button data-role="accordionist"><b>🪗 Acordeonista</b><small>Acordeón / guitarra</small></button><button data-role="drummer"><b>🥁 Baterista</b><small>Seguimiento</small></button><button data-role="keyboardist"><b>🎹 Tecladista</b><small>Teclado / guitarra</small></button></div><p class="note fc-profile-foot">Si este es un segundo dispositivo, utiliza la vinculación QR desde tu dispositivo ya autorizado.</p><button type="button" id="fcProfileGateQr">Ya tengo un QR para vincular</button></div>';
+      document.body.appendChild(gate);
+      Array.prototype.forEach.call(gate.querySelectorAll('[data-role]'), function (button) {
+        button.onclick = function () {
+          var role = button.dataset.role;
+          if (role === 'accordionist' && currentUser && currentUser.uid !== OWNER_UID) {
+            alert('El perfil Acordeonista está reservado al propietario técnico. Si es tu propio segundo dispositivo, utiliza “Ya tengo un QR para vincular”.');
+            return;
+          }
+          selectedProfileRole = role; localStorage.setItem(PROFILE_KEY, role);
+          hideFirstProfileGate(); updateSyncButtons();
+          setStatus('Perfil guardado: ' + roleName(role) + '. Completa la incorporación en Más → Mi banda y sincronización.', 'success');
+          if (typeof window.show === 'function') window.show('vm');
+        };
+      });
+      var gateQr = $('fcProfileGateQr'); if (gateQr) gateQr.onclick = function () { hideFirstProfileGate(); if (typeof window.show === 'function') window.show('vm'); setTimeout(function () { if ($('fcScanDeviceLink')) $('fcScanDeviceLink').click(); }, 250); };
+    }
+    if (!$('fcMiniPlayer')) {
+      var mini = document.createElement('aside'); mini.id = 'fcMiniPlayer'; mini.className = 'fc-mini-player'; mini.style.display = 'none';
+      mini.innerHTML = '<div class="fc-mini-top"><span class="fc-mini-live-dot"></span><span id="fcMiniMode">EN VIVO</span><span class="fc-mini-event" id="fcMiniEvent"></span><span class="fc-mini-state" id="fcMiniState"></span></div><div class="fc-mini-main"><div class="fc-mini-copy"><strong id="fcMiniSong">—</strong><span id="fcMiniLine">Esperando canción del director…</span></div><button type="button" id="fcMiniReturn">Volver a sincronía</button></div><div class="fc-mini-progress-track"><span id="fcMiniProgress"></span></div><span class="fc-mini-progress-text" id="fcMiniProgressText"></span>';
+      document.body.appendChild(mini);
     }
     var listView = $('vl');
     if (listView && !$('fcLiveBanner')) {
@@ -998,8 +1186,10 @@
     if ($('fcProfileSave')) $('fcProfileSave').onclick = function () {
       var role = $('fcProfileSelect').value;
       if (!role) { alert('Selecciona una función.'); return; }
+      if (role === 'accordionist' && currentUser && currentUser.uid !== OWNER_UID) { alert('Acordeonista está reservado al propietario técnico. Para un segundo dispositivo, utiliza QR.'); return; }
       if (isConnected()) { alert('Tu función ya fue asignada por el propietario técnico. Para cambiarla, solicita que actualice tu perfil.'); return; }
       selectedProfileRole = role; localStorage.setItem(PROFILE_KEY, role);
+      hideFirstProfileGate();
       updateSyncButtons();
       setStatus(role === 'voice1' ? 'Perfil Voz 1 seleccionado. Solicita incorporación a la banda.' : 'Perfil ' + roleName(role) + ' seleccionado. Pulsa Solicitar incorporación.', 'success');
     };
@@ -1011,6 +1201,23 @@
       else { setStatus('ID del teléfono: ' + uid, 'neutral'); }
     };
     profileButtonActions();
+    if ($('fcMiniReturn')) $('fcMiniReturn').onclick = returnToLive;
+    if ($('rd') && !$('rd').dataset.fcLiveScrollBound) {
+      $('rd').dataset.fcLiveScrollBound = '1';
+      $('rd').addEventListener('scroll', function () {
+        if (memberRole !== 'voice1' || window.mode !== 's' || !liveState || !window.cur || liveState.songId !== window.cur.id) return;
+        if (scrollPublishTimer) clearTimeout(scrollPublishTimer);
+        scrollPublishTimer = setTimeout(syncDirectorRowFromScroll, 120);
+      }, { passive: true });
+    }
+    if ($('play') && !$('play').dataset.fcPlaySyncBound) {
+      $('play').dataset.fcPlaySyncBound = '1';
+      $('play').addEventListener('click', function () { setTimeout(function () {
+        if (memberRole !== 'voice1' || !liveState || !window.cur || liveState.songId !== window.cur.id) return;
+        if (window.mode === 'b' && window.bassEvents && window.bassEvents.length) { var ev = window.bassEvents[window.bassIndex] || window.bassEvents[0]; publishLivePosition(ev && ev.line ? Number(ev.line.dataset.lineIndex || 0) : 0, window.bassIndex || 0, !window.chordTimer); }
+        else syncDirectorRowFromScroll();
+      }, 40); });
+    }
   }
 
   function addStyles() {
@@ -1019,7 +1226,8 @@
       '.fc-panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}.fc-panel-head strong{font-size:17px}.fc-panel-icon{font-size:25px}' +
       '.fc-status{padding:9px 11px;border-radius:10px;font-size:13px;font-weight:700;background:var(--bg)}.fc-status.success{color:#16764b;background:rgba(22,139,88,.10)}.fc-status.warning{color:#946200;background:rgba(220,160,30,.13)}.fc-status.error{color:#b3261e;background:rgba(179,38,30,.10)}' +
       '.fc-field-label{font-size:12px;color:var(--mut);font-weight:800;margin-top:3px}.fc-auth-row,.fc-invite-row{display:flex;gap:7px}.fc-auth-row button,.fc-invite-row button{flex:1;min-width:0}.fc-band-box{border-top:1px solid var(--line);padding-top:10px;display:flex;flex-direction:column;gap:8px}.fc-member-admin{border-top:1px solid var(--line);padding-top:10px}.fc-member-head{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:8px}.fc-member-row{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line)}.fc-member-info{flex:1;min-width:0}.fc-member-info strong,.fc-member-info small{display:block;overflow-wrap:anywhere}.fc-member-info small{font-size:11px;color:var(--mut)}.fc-member-row select{width:47%;min-width:128px;padding:7px;font-size:12px}.fc-sync-panel code{font-size:10px;overflow-wrap:anywhere}.fc-sync-panel #fcProfileSelect{width:100%}.fc-sync-panel #fcCopyUid{font-size:11px;min-height:30px;padding:4px 8px}.fc-follow-row{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700}.fc-follow-row input{width:18px;min-height:18px;height:18px}.fc-live-banner{width:calc(100% - 24px);margin:0 12px 8px;text-align:left;background:rgba(22,139,88,.12);border-color:rgba(22,139,88,.35);color:var(--fg);font-size:13px;font-weight:850;display:flex;align-items:center;gap:8px}.fc-live-banner span:nth-child(2){flex:1}.fc-live-dot{width:9px;height:9px;border-radius:100%;background:#16a36a;display:inline-block}.fc-role-bar{padding:8px 12px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:var(--bg)}.fc-role-line{display:flex;align-items:center;justify-content:space-between;gap:7px;width:100%;font-size:12px}.fc-role-line button{font-size:12px;min-height:36px;padding:6px 9px}.fc-role-bar select{min-height:38px;font-size:13px}.fc-next-only{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px 18px;gap:12px;overflow:auto}.fc-next-chip{padding:6px 12px;border-radius:20px;background:var(--acc);color:var(--accfg);font-weight:900;font-size:12px}.fc-next-caption{font-size:11px;color:var(--mut);font-weight:900;letter-spacing:.12em}.fc-next-current{font-size:clamp(25px,6vw,38px);font-weight:900;line-height:1.1}.fc-next-title{font-size:clamp(28px,8vw,48px);font-weight:950;color:var(--acc);line-height:1.08}.fc-next-key{font-size:14px;color:var(--mut);font-weight:800}.fc-event-selected-row{display:block}.fc-event-song-head{display:flex;align-items:center;gap:7px}.fc-assignment-controls{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:7px 3px 2px 29px}.fc-assignment-controls label{font-size:10px;color:var(--mut);font-weight:800}.fc-assignment-controls select{display:block;min-height:35px;font-size:12px;padding:5px;margin-top:3px}.fc-live-song{background:rgba(22,139,88,.09);border-radius:10px;padding-left:8px;padding-right:8px}.fc-play-song{font-size:12px;padding:7px 9px;min-height:36px}' +
-      '.fc-member-device{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 8px 8px 28px;font-size:11px;color:var(--mut)}.fc-member-device button{min-height:30px;padding:4px 8px;font-size:11px}.fc-pair-box{border:1px solid var(--line);border-radius:13px;padding:12px;background:var(--bg);display:flex;flex-direction:column;gap:9px}.fc-pair-title{font-size:16px;font-weight:900}.fc-pair-qr{display:flex;justify-content:center;align-items:center;background:#fff;border-radius:10px;padding:12px;min-height:230px}.fc-pair-qr img{max-width:100%;height:auto}.fc-pair-url{font-size:10px;color:var(--mut);overflow-wrap:anywhere;user-select:text}.fc-pair-box button{width:100%}';
+      '.fc-member-device{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 8px 8px 28px;font-size:11px;color:var(--mut)}.fc-member-device button{min-height:30px;padding:4px 8px;font-size:11px}.fc-pair-box{border:1px solid var(--line);border-radius:13px;padding:12px;background:var(--bg);display:flex;flex-direction:column;gap:9px}.fc-pair-title{font-size:16px;font-weight:900}.fc-pair-qr{display:flex;justify-content:center;align-items:center;background:#fff;border-radius:10px;padding:12px;min-height:230px}.fc-pair-qr img{max-width:100%;height:auto}.fc-pair-url{font-size:10px;color:var(--mut);overflow-wrap:anywhere;user-select:text}.fc-pair-box button{width:100%}' +
+      '.fc-live-row-current{outline:1px solid color-mix(in srgb,var(--acc) 25%,transparent);outline-offset:3px;border-radius:7px}.fc-profile-gate{position:fixed;inset:0;z-index:2000;display:grid;place-items:center;padding:18px;background:rgba(7,14,25,.78);backdrop-filter:blur(7px)}.fc-profile-card{width:min(100%,480px);max-height:90dvh;overflow:auto;background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:22px;padding:20px;box-shadow:0 18px 60px rgba(0,0,0,.3);display:flex;flex-direction:column;gap:12px}.fc-profile-brand{width:48px;height:48px;border-radius:15px;display:grid;place-items:center;background:var(--acc);color:var(--accfg);font-size:28px}.fc-profile-title{font-size:24px}.fc-profile-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.fc-profile-grid button{min-height:76px;text-align:left;display:flex;flex-direction:column;gap:4px;padding:11px}.fc-profile-grid button b{font-size:14px}.fc-profile-grid button small{color:var(--mut);font-size:11px}.fc-profile-foot{margin:0}.fc-mini-player{position:fixed;left:10px;right:10px;bottom:calc(8px + env(safe-area-inset-bottom));z-index:1100;display:flex;flex-direction:column;gap:5px;padding:9px 11px 7px;border:1px solid color-mix(in srgb,var(--acc) 38%,var(--line));border-radius:14px;background:color-mix(in srgb,var(--card) 94%,transparent);color:var(--fg);box-shadow:0 8px 26px rgba(0,0,0,.18);backdrop-filter:blur(12px)}body.fc-reader-open .fc-mini-player{bottom:calc(98px + env(safe-area-inset-bottom))}.fc-mini-top{display:flex;align-items:center;gap:6px;font-size:10px;font-weight:900;letter-spacing:.06em;color:var(--mut);min-width:0}.fc-mini-live-dot{width:8px;height:8px;border-radius:50%;background:#18a66a;flex:0 0 auto}.fc-mini-player.is-paused .fc-mini-live-dot{background:#d49b2e}.fc-mini-event{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;font-weight:700;letter-spacing:0}.fc-mini-state{white-space:nowrap}.fc-mini-main{display:flex;align-items:center;gap:9px;min-width:0}.fc-mini-copy{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}.fc-mini-copy strong{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.fc-mini-copy span{font-size:11px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.fc-mini-main button{min-height:35px;padding:6px 9px;font-size:11px;font-weight:850;white-space:nowrap}.fc-mini-player.is-free{border-color:color-mix(in srgb,#d49b2e 55%,var(--line))}.fc-mini-progress-track{height:3px;background:var(--line);border-radius:99px;overflow:hidden}.fc-mini-progress-track span{height:100%;display:block;width:0;background:var(--acc);transition:width .2s}.fc-mini-progress-text{position:absolute;right:11px;top:8px;font-size:9px;color:var(--mut);display:none}#list{padding-bottom:100px}.event-list{padding-bottom:100px}';
     var style = document.createElement('style'); style.textContent = css; document.head.appendChild(style);
   }
 
@@ -1027,6 +1235,7 @@
     if (window.firebase) connectFirebase();
     else setStatus('Firebase no se ha cargado. Comprueba Internet y vuelve a abrir la página.', 'error');
     if ($('fcProfileSelect') && selectedProfileRole) $('fcProfileSelect').value = selectedProfileRole;
+    if (selectedProfileRole) hideFirstProfileGate();
     updateSyncButtons();
   }
 
@@ -1049,11 +1258,11 @@
   $('eventCancel').onclick = function () { window.renderEvents(); window.show('vse'); };
   $('eventShare').style.display = 'none';
   if ($('playlistBack')) $('playlistBack').onclick = function () { window.show('vse'); };
-  if ($('fcLiveBanner')) $('fcLiveBanner').onclick = function () {
-    if (liveState && liveState.eventId && liveState.songId) { window.currentEventId = liveState.eventId; window.openEvent(liveState.eventId); window.openSong(liveState.songId, 'vplaylist'); }
-  };
+  if ($('fcLiveBanner')) $('fcLiveBanner').onclick = returnToLive;
   if ($('tmode')) $('tmode').addEventListener('click', function () { if (isConnected()) { setTimeout(applyRoleToCurrentSong, 0); } });
-  window.addEventListener('online', function () { if (currentUser && bandId && db) setStatus('Conexión recuperada. Sincronizando…', 'success'); });
-  window.addEventListener('offline', function () { if (currentUser && bandId) setStatus('Sin Internet. Se conserva la última información descargada; los cambios se sincronizarán al reconectar.', 'warning'); });
+  window.addEventListener('online', function () { if (currentUser && bandId && db) setStatus('Conexión recuperada. Sincronizando…', 'success'); renderMiniPlayer(); });
+  window.addEventListener('offline', function () { if (currentUser && bandId) setStatus('Sin Internet. Se conserva la última información descargada; los cambios se sincronizarán al reconectar.', 'warning'); renderMiniPlayer(); });
   renderEvents(); renderLiveBanner(); startAutoConnect(); updateSyncButtons();
+  if (selectedProfileRole) hideFirstProfileGate();
+  else setTimeout(maybeShowFirstProfileGate, 1800);
 })();

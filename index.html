@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#f3f5f7">
+<meta name="fc-build" content="live-sync-v11-follow-consult">
 <title>Frecuencia Cero – Letras y acordes</title>
 <meta name="application-name" content="Frecuencia Cero">
 <meta name="apple-mobile-web-app-title" content="Frecuencia Cero">
@@ -477,7 +478,7 @@ function paint(){
   var empty=document.createElement('div');empty.className='empty';empty.textContent='Esta canción todavía no tiene letra. Pulsa “Editar” para pegarla y colocar los acordes.';rt.appendChild(empty);
   $('rmeta').textContent='Sin letra cargada · Duración aprox. '+formatDuration(songDuration(cur))+(cur.mappingNote?' · '+cur.mappingNote:'');updateModeControls();return;
  }
- lines.forEach(function(line){var d=document.createElement('div');
+ lines.forEach(function(line,lineIndex){var d=document.createElement('div');d.dataset.lineIndex=String(lineIndex);
   if(/^##\s*/.test(line)){d.className='sec';d.textContent=line.replace(/^##\s*/,'').trim();rt.appendChild(d);return;}
   if(mode==='s'){d.className='lyric-line';d.textContent=line.replace(/\[[^\]]+\]/g,'')||' ';rt.appendChild(d);}
   else{d.className='bass-line';parseChordLine(line,d);rt.appendChild(d);}
@@ -487,7 +488,7 @@ function paint(){
 }
 function syncModeButton(){var b=$('tmode');if(!b)return;b.textContent=mode==='s'?'Cantante':'Bajista';b.setAttribute('data-mode',mode);b.setAttribute('aria-label',mode==='s'?'Cambiar a vista bajista':'Cambiar a vista cantante');b.setAttribute('aria-pressed',mode==='b'?'true':'false')}
 function updateModeControls(){var isBass=mode==='b';$('bassTools').classList.toggle('on',isBass);$('singerTools').classList.toggle('off',isBass);$('play').textContent=isBass?(chordTimer?'❚❚ Pausar':'▶ Auto acordes'):(scrollFrame?'❚❚ Pausar':'▶ Scroll');$('play').title=isBass?'Avanza un acorde cada intervalo configurado':'Desplazamiento automático continuo';$('chordtime').textContent=(cur&&cur.chordSeconds?Number(cur.chordSeconds).toFixed(1):'3.0')+' s';$('speedrange').value=String(speed);$('speedval').textContent=speed+' px/s';$('trl').textContent=(cur&&cur.tr>0?'+':'')+(cur&&cur.tr||0)}
-function setActiveBassEvent(index,scroll){if(!bassEvents.length)return;bassIndex=Math.max(0,Math.min(index,bassEvents.length-1));var activeLine=bassEvents[bassIndex].line;bassEvents.forEach(function(ev,i){ev.el.classList.toggle('active',i===bassIndex)});Array.prototype.forEach.call($('rt').querySelectorAll('.bass-line'),function(line){line.classList.toggle('line-current',line===activeLine)});if(scroll){var target=bassEvents[bassIndex].el,rd=$('rd'),r=target.getBoundingClientRect(),container=rd.getBoundingClientRect(),top=rd.scrollTop+(r.top-container.top)-Math.max(35,rd.clientHeight*.38);rd.scrollTo({top:Math.max(0,top),behavior:'smooth'})}}
+function setActiveBassEvent(index,scroll){if(!bassEvents.length)return;bassIndex=Math.max(0,Math.min(index,bassEvents.length-1));var activeLine=bassEvents[bassIndex].line;bassEvents.forEach(function(ev,i){ev.el.classList.toggle('active',i===bassIndex)});Array.prototype.forEach.call($('rt').querySelectorAll('.bass-line'),function(line){line.classList.toggle('line-current',line===activeLine)});if(scroll){var target=bassEvents[bassIndex].el,rd=$('rd'),r=target.getBoundingClientRect(),container=rd.getBoundingClientRect(),top=rd.scrollTop+(r.top-container.top)-Math.max(35,rd.clientHeight*.38);rd.scrollTo({top:Math.max(0,top),behavior:'smooth'})}if(window.fcSyncPositionChanged&&bassEvents[bassIndex])window.fcSyncPositionChanged(Number(activeLine.dataset.lineIndex||0),bassIndex)}
 function stopAuto(){if(chordTimer){clearInterval(chordTimer);chordTimer=null}updateModeControls()}
 function startBassAuto(){if(!bassEvents.length){alert('Esta canción no tiene acordes entre corchetes. Edita la letra y agrega marcas como [G] o [D].');return}if(chordTimer){stopAuto();return}if(bassIndex>=bassEvents.length-1)bassIndex=0;setActiveBassEvent(bassIndex,true);var ms=Math.max(500,Number(cur.chordSeconds||3.0)*1000);chordTimer=setInterval(function(){if(bassIndex>=bassEvents.length-1){if(cur&&cur.loopChords){setActiveBassEvent(0,true);return}stopAuto();return}setActiveBassEvent(bassIndex+1,true)},ms);updateModeControls()}
 function goSinger(){if(scrollFrame){stopSinger();return}var rd=$('rd'),acc=rd.scrollTop,last=performance.now();$('play').textContent='❚❚ Pausar';function step(now){var dt=(now-last)/1000;last=now;acc+=speed*dt;rd.scrollTop=acc;if(rd.scrollTop+rd.clientHeight>=rd.scrollHeight-2){stopSinger();return}scrollFrame=requestAnimationFrame(step)}scrollFrame=requestAnimationFrame(step)}
