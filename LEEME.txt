@@ -1,10 +1,12 @@
-FRECUENCIA CERO V14 - GENERADOR QR VISIBLE
+FRECUENCIA CERO V15 - MENÚ LIMPIO Y QR EN DOS ACCIONES
 
-1. Este paquete actualiza la web en GitHub Pages. Descomprime el ZIP y sube todo el contenido de esta carpeta a la raíz del repositorio, reemplazando los archivos anteriores.
-2. El UID del propietario técnico ya está configurado en fc-sync.js: qZCvhHTK3MUhcABIlZlRyrqHKdC2. No lo cambies.
-3. En el iPhone del propietario aparece el botón “Crear banda y generar código QR” si la banda aún no existe. Si la banda ya está creada y el propietario está conectado, el botón dice “Generar código QR para vincular otro dispositivo”.
-4. En un teléfono nuevo aparece “Escanear código QR”. Ese teléfono debe leer el QR que muestra el iPhone autorizado; no puede generar el primer QR mientras no esté vinculado.
-5. El QR dura 3 minutos y se usa una sola vez. Para otro teléfono, genera un QR nuevo desde un dispositivo ya autorizado.
-6. Las reglas de Firebase se publican por separado en Firebase Console. Authentication anónimo debe estar habilitado y Realtime Database debe tener reglas que permitan al UID propietario crear y administrar la banda, así como emitir y consumir emparejamientos.
-7. El flujo del botón comprueba la banda existente antes de crearla. Si encuentra una banda con otro propietario o una relación de miembro incompleta, se detiene y muestra el motivo; no sobrescribe datos.
-8. No cierres sesión ni borres los datos del sitio en el iPhone propietario, porque Firebase Authentication anónimo conserva la identidad local de ese dispositivo.
+1. Descomprime este ZIP y sube TODO el contenido de la carpeta a la raíz del repositorio GitHub Pages, reemplazando los archivos existentes.
+2. En el iPhone propietario, entra a Más → Mi banda y sincronización.
+3. Si todavía no existe la banda, pulsa «Crear banda». Este botón SOLO crea o recupera de forma segura la banda; no genera un QR.
+4. Cuando el iPhone aparezca conectado, pulsa el segundo botón «Generar código QR para vincular otro dispositivo».
+5. En el otro teléfono, selecciona el perfil que corresponda o pulsa «Escanear código QR» y lee el código del iPhone autorizado.
+6. En Más se conserva la administración de solicitudes, integrantes, funciones y dispositivos. Se retiró el importador masivo de canciones de ese menú; las canciones nuevas se agregan desde el botón + del catálogo.
+7. En la parte inferior de Más aparece Frecuencia Cero · V15 y «Buscar actualizaciones». Ese botón consulta el Service Worker y, si encuentra una versión nueva, la activa y recarga la aplicación. No borra la identidad de Firebase ni las canciones/eventos locales.
+8. Si GitHub ya está actualizado y el teléfono conserva una versión anterior, abre Más → Buscar actualizaciones.
+9. No elimines el acceso de inicio, no cierres sesión de Firebase y no borres datos de Safari para actualizar.
+10. UID de propietario configurado: qZCvhHTK3MUhcABIlZlRyrqHKdC2.

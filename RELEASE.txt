@@ -1,2 +1,9 @@
-Frecuencia Cero V14 - Generador QR visible y flujo de propietario.
-Se separan claramente las acciones: el dispositivo propietario crea la banda (si no existe) y genera el QR; los dispositivos no vinculados escanean el código. El UID propietario queda fijado al identificador confirmado por el usuario. Se conserva la protección para no sobrescribir bandas existentes. La caché del service worker cambia a v14.
+Frecuencia Cero V15 - Separación de crear banda y generar QR; actualización manual segura; menú Más simplificado.
+
+- El iPhone propietario ve «Crear banda» como acción independiente.
+- Después de quedar conectado aparece «Generar código QR para vincular otro dispositivo».
+- Los dispositivos nuevos conservan únicamente la acción «Escanear código QR».
+- Se agrega «Buscar actualizaciones» y etiqueta discreta «Frecuencia Cero · V15».
+- Se retira del menú Más el importador masivo de canciones y sus instrucciones; se conserva el alta individual desde el botón + y el procesador de acordes dentro del editor.
+- Se conserva el respaldo de canciones y eventos, el cambio de tema y el panel de banda/sincronización.
+- La versión de caché se incrementa a V15; la actualización no borra localStorage ni la identidad anónima de Firebase.

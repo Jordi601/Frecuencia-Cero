@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#f3f5f7">
-<meta name="fc-build" content="live-sync-v11-follow-consult">
+<meta name="fc-build" content="live-sync-v15-separated-qr-update-menu">
 <title>Frecuencia Cero – Letras y acordes</title>
 <meta name="application-name" content="Frecuencia Cero">
 <meta name="apple-mobile-web-app-title" content="Frecuencia Cero">
@@ -46,6 +46,12 @@ input,textarea,select{width:100%;background:var(--card);border:1px solid var(--l
 .bass-key-banner.on{display:inline-flex}
 
 .menu-content{display:flex;flex-direction:column;height:100%;padding:12px;gap:10px;overflow-y:auto}
+.menu-utility-actions{display:flex;flex-direction:column;gap:9px}
+.menu-utility-actions button{width:100%;min-height:45px;text-align:left;border-radius:13px;font-size:13px;font-weight:750}
+.backup-fallback:not([hidden]){display:block;min-height:160px;font-size:11px;resize:vertical}
+.fc-app-meta{display:flex;align-items:center;justify-content:flex-end;gap:9px;margin-top:auto;padding:10px 2px 0;color:var(--mut);font-size:10px;font-weight:750}
+.fc-app-meta button{min-height:32px;padding:5px 9px;border-radius:9px;font-size:10px;font-weight:800;color:var(--mut);background:transparent;box-shadow:none}
+.fc-update-status{text-align:right;margin:0 2px 2px;font-size:10px;color:var(--mut)}
 
 .event-intro{padding:4px 14px 10px;color:var(--mut);font-size:13px;line-height:1.4}
 .event-list{flex:1;min-height:0;overflow:auto;padding:4px 12px 18px;-webkit-overflow-scrolling:touch}
@@ -363,9 +369,19 @@ body{
 </section>
 <section class="view" id="vm">
  <div class="menu-content">
-  <p class="note"><strong>Cómo importar canciones</strong><br>Puedes pegar canciones con el formato de encabezados <b>Nombre:</b>, <b>Tono:</b> y <b>Duración:</b>. También puedes separar varias canciones con una línea que empiece con # y el título. Los acordes pueden venir en renglones separados encima de la letra o entre corchetes, por ejemplo [G]Cuando llegue [D7]el día. La aplicación los acomodará para el modo bajista; revisa su alineación antes de guardar. Usa ## Coro, ## Verso, etc. para marcar secciones. El tono determina el bloque del catálogo.</p>
-  <textarea id="mi" placeholder="# Nombre de canción&#10;Tono: Sol&#10;Duración: 03:20&#10;&#10;G&#10;Aquí empieza la letra&#10;D7&#10;Y continúa la letra&#10;&#10;# Otra canción&#10;Tono: Re&#10;D&#10;Otra letra..."></textarea>
-  <button id="mimp" class="p">Importar canciones</button><button id="mexp">Copiar respaldo de todas</button><button id="mth">Cambiar tema claro/oscuro</button><button id="mback">Volver</button><p id="mmsg" class="note"></p>
+  <!-- Campo auxiliar: solo se muestra si el portapapeles no está disponible al crear un respaldo. -->
+  <textarea id="mi" class="backup-fallback" hidden aria-label="Respaldo de Frecuencia Cero"></textarea>
+  <div class="menu-utility-actions">
+   <button id="mexp" type="button">Copiar respaldo de canciones y eventos</button>
+   <button id="mth" type="button">Cambiar tema claro / oscuro</button>
+   <button id="mback" type="button">Volver al catálogo</button>
+  </div>
+  <p id="mmsg" class="note" aria-live="polite"></p>
+  <div class="fc-app-meta">
+   <span id="fcAppVersion">Frecuencia Cero · V15</span>
+   <button id="fcCheckUpdates" type="button">↻ Buscar actualizaciones</button>
+  </div>
+  <p id="fcUpdateStatus" class="fc-update-status" aria-live="polite">La versión instalada se conserva al actualizar.</p>
  </div>
 </section>
 <script>
@@ -582,8 +598,7 @@ $('bnew').onclick=function(){edit(null)};$('bedit').onclick=function(){edit(cur&
 $('esave').onclick=function(){var title=$('et').value.trim(),text=$('el').value.replace(/\s+$/,'');if(!title){alert('Escribe el título de la canción.');return}var duration=parseDuration($('eduration').value);if(duration===null||duration<30){alert('Escribe la duración como mm:ss, por ejemplo 03:20.');$('eduration').focus();return}var key=$('ekey').value;if(editId){var s=find(editId);s.title=title;s.text=text;s.key=key;s.chordDraft=false;s.durationSec=duration;s.chordSeconds=Number(s.chordSeconds||3.0);s.scrollSpeed=Number(s.scrollSpeed||defaultSpeed);cur=s;save();render();openSong(editId)}else{var existing=songs.find(function(x){return norm(x.title)===norm(title)});if(existing){existing.text=text;existing.key=key;existing.durationSec=duration;save();render();openSong(existing.id)}else{var id='s'+Date.now();songs.push({id:id,title:title,text:text,star:false,key:key,chordDraft:false,durationSec:duration,chordSeconds:3.0,scrollSpeed:defaultSpeed});save();render();openSong(id)}}};
 $('edel').onclick=function(){if(!editId)return;if(confirm('¿Borrar esta canción?')){songs=songs.filter(function(s){return s.id!==editId});save();render();show('vl')}};
 $('ekey').onchange=updatePalette;$('eprocessChords').onclick=processChordImport;$('bmenu').onclick=function(){$('mmsg').textContent='';show('vm')};$('mback').onclick=function(){show('vl')};
-$('mimp').onclick=function(){var raw=$('mi').value,backup=null;try{backup=JSON.parse(raw)}catch(e){}if(backup&&backup.format==='letras-repertorio-v2'){var result=importBackupOrText(raw);$('mmsg').textContent='Respaldo restaurado: '+result.count+' canciones.';}else{var result=importText(raw);$('mmsg').textContent=result.count+' canciones importadas o actualizadas. Se acomodaron '+result.converted+' marcas de acorde desde renglones separados.';}$('mi').value='';};
-$('mexp').onclick=function(){var data={format:'letras-repertorio-v2',songs:songs,events:events};var text=JSON.stringify(data,null,2);if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(text).then(function(){$('mmsg').textContent='Respaldo JSON copiado. Guárdalo en Notas o Drive.'}).catch(function(){$('mi').value=text;$('mmsg').textContent='No se pudo copiar automáticamente; el respaldo quedó en el cuadro de texto.'})}else{$('mi').value=text;$('mmsg').textContent='Copia el respaldo JSON del cuadro de texto.'}};
+$('mexp').onclick=function(){var data={format:'letras-repertorio-v2',songs:songs,events:events};var text=JSON.stringify(data,null,2);var field=$('mi');field.value=text;if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(text).then(function(){field.hidden=true;$('mmsg').textContent='Respaldo copiado. Guárdalo en Notas o Drive.'}).catch(function(){field.hidden=false;$('mmsg').textContent='No se pudo copiar automáticamente. El respaldo quedó visible abajo para que puedas copiarlo.'})}else{field.hidden=false;$('mmsg').textContent='El respaldo quedó visible abajo. Mantén pulsado el texto para copiarlo.'}};
 $('mth').onclick=function(){var d=document.documentElement,theme=d.getAttribute('data-theme'),dark=theme?theme==='dark':matchMedia('(prefers-color-scheme: dark)').matches;d.setAttribute('data-theme',dark?'light':'dark')};
 $('fm').onclick=function(){fs=Math.max(16,fs-2);$('rt').style.fontSize=fs+'px';$('rh').style.fontSize=(fs*.6)+'px';safeStore('letras_fs',String(fs))};$('fp').onclick=function(){fs=Math.min(72,fs+2);$('rt').style.fontSize=fs+'px';$('rh').style.fontSize=(fs*.6)+'px';safeStore('letras_fs',String(fs))};
 $('speedrange').oninput=function(){speedChange(this.value)};$('sm').onclick=function(){speedChange(speed-5)};$('sp2').onclick=function(){speedChange(speed+5)};

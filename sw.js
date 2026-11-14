@@ -1,4 +1,4 @@
-const CACHE_NAME = 'frecuencia-cero-shell-v14-qr-generator-flow';
+const CACHE_NAME = 'frecuencia-cero-shell-v15-separated-qr-update-menu';
 const APP_FILES = [
   './',
   './index.html',
@@ -43,4 +43,8 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     caches.match(request).then((cached) => cached || fetch(request))
   );
+});
+
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'FC_SKIP_WAITING') self.skipWaiting();
 });

@@ -4,6 +4,7 @@
 (function () {
   'use strict';
 
+  var APP_VERSION = 'V15';
   var CFG_KEY = 'fc_firebase_config_v1';
   var BAND_KEY = 'fc_band_id_v1';
   var PROFILE_KEY = 'fc_device_profile_v1';
@@ -159,24 +160,26 @@
     if ($('fcProfileSelect') && ownerDevice && !connected) $('fcProfileSelect').style.display = 'none';
     if ($('fcDeviceUid')) $('fcDeviceUid').textContent = currentUser ? currentUser.uid : 'Preparando identidad de este teléfono…';
     if ($('fcCopyUid')) $('fcCopyUid').style.display = currentUser && !connected ? '' : 'none';
-    // La creación inicial se integra al botón del QR: una acción clara para el propietario.
-    if ($('fcCreateBand')) $('fcCreateBand').style.display = 'none';
+    // Dos acciones independientes: el propietario crea la banda; después genera el QR.
+    if ($('fcCreateBand')) {
+      $('fcCreateBand').style.display = (ownerDevice && !connected) ? '' : 'none';
+      $('fcCreateBand').disabled = !signed;
+      $('fcCreateBand').textContent = '＋ Crear banda';
+    }
     if ($('fcOwnerMismatch')) $('fcOwnerMismatch').style.display = (!connected && selectedProfileRole === 'accordionist' && currentUser && currentUser.uid !== OWNER_UID) ? '' : 'none';
     if ($('fcCurrentOwnerUid')) $('fcCurrentOwnerUid').textContent = currentUser ? currentUser.uid : 'Preparando identidad…';
     if ($('fcRequestJoin')) $('fcRequestJoin').style.display = (!connected && selectedProfileRole && selectedProfileRole !== 'accordionist') ? '' : 'none';
     if ($('fcRequestJoin')) $('fcRequestJoin').disabled = !signed || !!(window.fcJoinRequestPending);
     if ($('fcLinkDevice')) {
-      $('fcLinkDevice').style.display = (connected || ownerDevice) ? '' : 'none';
+      $('fcLinkDevice').style.display = connected ? '' : 'none';
       $('fcLinkDevice').disabled = !signed;
-      $('fcLinkDevice').textContent = ownerDevice && !connected
-        ? '＋ Crear banda y generar código QR'
-        : '▦ Generar código QR para vincular otro dispositivo';
+      $('fcLinkDevice').textContent = '▦ Generar código QR para vincular otro dispositivo';
     }
     if ($('fcScanDeviceLink')) $('fcScanDeviceLink').style.display = (!connected && signed && !ownerDevice) ? '' : 'none';
     if ($('fcPairHelp')) $('fcPairHelp').textContent = ownerDevice
       ? (connected
           ? 'Este es el dispositivo propietario. Pulsa Generar código QR y escanéalo desde el teléfono o tablet que quieras vincular.'
-          : 'Este iPhone está identificado como propietario. Pulsa el botón para crear la banda si aún no existe y generar el primer QR.')
+          : 'Este iPhone está identificado como propietario. Primero pulsa «Crear banda». Cuando se conecte, aparecerá por separado «Generar código QR».')
       : (connected
           ? 'Genera un QR para vincular otro teléfono o tablet a tu mismo perfil.'
           : 'Este dispositivo todavía no está vinculado. Escanea aquí el QR que genere un teléfono autorizado.');
@@ -184,7 +187,7 @@
     if ($('fcBandSummary')) $('fcBandSummary').textContent = connected
       ? ((bandMeta && bandMeta.name) || 'Frecuencia Cero') + ' · ' + roleName(memberRole)
       : (ownerDevice
-          ? 'Dispositivo propietario identificado. Pulsa “Crear banda y generar código QR” para iniciar la vinculación.'
+          ? 'Dispositivo propietario identificado. Primero crea la banda; después podrás generar el código QR como una segunda acción.'
           : (window.fcJoinRequestPending
               ? 'Solicitud enviada. Esperando aprobación del propietario técnico.'
               : (selectedProfileRole === 'accordionist' && currentUser && currentUser.uid !== OWNER_UID
@@ -201,8 +204,6 @@
     if ($('fcProfileSelect') && connected) $('fcProfileSelect').style.display = 'none';
     if ($('eventNew')) $('eventNew').style.display = connected && !canManageEvents() ? 'none' : '';
     var legacyImport = document.querySelector('.event-import'); if (legacyImport) legacyImport.style.display = connected ? 'none' : '';
-    if ($('mimp')) $('mimp').style.display = connected && !canManageCatalog() ? 'none' : '';
-    if ($('mimp') && connected && !canManageCatalog()) $('mmsg').textContent = 'La importación y edición del catálogo están reservadas al propietario técnico.';
     if ($('playlistEdit')) $('playlistEdit').style.display = connected && !canManageEvents() ? 'none' : '';
     if ($('bnew')) $('bnew').style.display = connected && !canManageCatalog() ? 'none' : '';
     if ($('bedit')) $('bedit').style.display = connected && !canManageCatalog() ? 'none' : '';
@@ -355,7 +356,7 @@
       lastCatalogJson = safeJson(mapById(window.songs || [])); lastEventsJson = safeJson(mapById(window.events || []));
       attachedUid = ''; identityKind = 'members';
       await attachBand(FIXED_BAND_ID, 'members');
-      setStatus('Banda creada. Este teléfono es el propietario técnico. Ahora puedes generar el QR para vincular otro dispositivo.', 'success');
+      setStatus('Banda creada correctamente. Ahora pulsa «Generar código QR» para vincular otro dispositivo.', 'success');
       return true;
     } catch (err) {
       var detail = err && err.code === 'PERMISSION_DENIED' ? 'Firebase rechazó la creación. Publica las reglas de Realtime Database con el UID autorizado del propietario técnico.' : (err.message || 'Error desconocido.');
@@ -541,40 +542,60 @@
       setStatus('QR generado. Escanéalo desde el dispositivo que quieres vincular.', 'success');
     } catch (err) { setStatus('No se pudo generar el QR: ' + (err.message || err), 'error'); }
   }
+  async function handleOwnerBandAction() {
+    var button = $('fcCreateBand');
+    try {
+      if (!currentUser || !db) throw new Error('Espera a que Firebase identifique este dispositivo.');
+      if (currentUser.uid !== OWNER_UID) throw new Error('Solo el iPhone registrado como propietario técnico puede crear la banda.');
+      if (isConnected()) throw new Error('La banda ya está conectada. Utiliza «Generar código QR» como acción independiente.');
+      if (button) { button.disabled = true; button.textContent = 'Comprobando banda…'; }
+      selectedProfileRole = 'accordionist';
+      localStorage.setItem(PROFILE_KEY, 'accordionist');
+      var rootSnap = await db.ref('bands/' + FIXED_BAND_ID).once('value');
+      if (!rootSnap.exists()) {
+        setStatus('Creando la banda como propietario técnico…', 'neutral');
+        var created = await createBand();
+        if (!created) return;
+      } else {
+        var rootData = rootSnap.val() || {};
+        var meta = rootData.meta || {};
+        if (meta.ownerUid !== OWNER_UID) {
+          throw new Error('Ya existe una banda con ese identificador, pero no está registrada a nombre de este propietario. No modifiqué ningún dato. Hay que revisar la banda existente en Firebase.');
+        }
+        var ownerMember = rootData.members && rootData.members[OWNER_UID];
+        if (!ownerMember || !ownerMember.role || ownerMember.role === 'pending') {
+          throw new Error('La banda ya existe y pertenece a este UID, pero falta el perfil del propietario en /members. No se sobrescribió ningún dato; hay que revisar esa relación en Firebase.');
+        }
+        bandMeta = meta;
+        bandId = FIXED_BAND_ID;
+        localStorage.setItem(BAND_KEY, bandId);
+        memberRole = ownerMember.role;
+        memberProfile = ownerMember;
+        identityKind = 'members';
+        await attachBand(FIXED_BAND_ID, 'members');
+        setStatus('Se recuperó la banda existente sin modificar integrantes, canciones ni eventos. Ahora puedes generar el QR por separado.', 'success');
+      }
+    } catch (err) {
+      var message = err && err.code === 'PERMISSION_DENIED'
+        ? 'Firebase bloqueó la operación. Revisa que Authentication anónimo esté habilitado y que las reglas de Realtime Database permitan al propietario consultar y crear la banda.'
+        : (err.message || 'No se pudo crear o recuperar la banda.');
+      setStatus('No se pudo crear la banda: ' + message, 'error');
+      alert(message);
+    } finally {
+      if (button) { button.disabled = false; button.textContent = '＋ Crear banda'; }
+      updateSyncButtons();
+    }
+  }
+
   async function handleGeneratePairQr() {
     try {
       if (!currentUser || !db) throw new Error('Espera a que Firebase identifique este dispositivo.');
-      if (currentUser.uid === OWNER_UID && !isConnected()) {
-        selectedProfileRole = 'accordionist';
-        localStorage.setItem(PROFILE_KEY, 'accordionist');
-        updateSyncButtons();
-        var rootRef = db.ref('bands/' + FIXED_BAND_ID);
-        var rootSnap = await rootRef.once('value');
-        if (!rootSnap.exists()) {
-          setStatus('Creando la banda como propietario técnico…', 'neutral');
-          var created = await createBand();
-          if (!created || !isConnected()) return;
-        } else {
-          var rootData = rootSnap.val() || {};
-          var meta = rootData.meta || {};
-          if (meta.ownerUid !== OWNER_UID) {
-            throw new Error('Ya existe una banda con ese identificador, pero no está registrada a nombre de este propietario. No modifiqué ningún dato. Hay que revisar la banda existente en Firebase.');
-          }
-          var ownerMember = rootData.members && rootData.members[OWNER_UID];
-          if (!ownerMember || !ownerMember.role) {
-            throw new Error('Firebase reconoce el UID como propietario, pero no encuentra su integrante en /members. No sobrescribí la banda. Hay que reparar esa relación en Firebase antes de emitir QR.');
-          }
-          bandMeta = meta;
-          activateMembership(ownerMember, 'members');
-          await attachBand(FIXED_BAND_ID, 'members');
-        }
-      }
-      if (!isConnected() || !memberProfile) throw new Error('Este dispositivo aún no tiene un perfil autorizado. Completa primero la creación o aprobación de la banda.');
+      if (!isConnected() || !memberProfile) throw new Error('Primero crea la banda o completa la aprobación/vinculación de este perfil. El QR se genera en una acción separada, después de quedar conectado.');
       await createDevicePairing();
     } catch (err) {
       var message = err && err.code === 'PERMISSION_DENIED'
-        ? 'Firebase bloqueó la operación. Revisa que Authentication anónimo esté habilitado y que hayas publicado las reglas de Realtime Database para este propietario.'
-        : (err.message || 'No se pudo preparar la vinculación.');
+        ? 'Firebase bloqueó la operación. Revisa que Authentication anónimo esté habilitado y que hayas publicado las reglas de Realtime Database.'
+        : (err.message || 'No se pudo generar el QR.');
       setStatus('No se pudo generar el QR: ' + message, 'error');
       alert(message);
     }
@@ -1211,13 +1232,70 @@
     firstProfileGateShown = true;
     gate.style.display = 'grid';
   }
+  async function checkForAppUpdates() {
+    var button = $('fcCheckUpdates');
+    var label = $('fcUpdateStatus');
+    if (button) { button.disabled = true; button.textContent = 'Comprobando…'; }
+    if (label) label.textContent = 'Buscando una versión nueva…';
+    try {
+      if (!('serviceWorker' in navigator)) {
+        if (label) label.textContent = 'Este navegador no admite actualización automática. Recarga la página desde Safari.';
+        return;
+      }
+      var registration = await navigator.serviceWorker.getRegistration('./');
+      if (!registration) registration = await navigator.serviceWorker.register('./sw.js?v=15');
+      var controllerChanged = new Promise(function (resolve) {
+        var finished = false;
+        var finish = function () {
+          if (finished) return;
+          finished = true;
+          navigator.serviceWorker.removeEventListener('controllerchange', finish);
+          resolve(true);
+        };
+        navigator.serviceWorker.addEventListener('controllerchange', finish);
+        setTimeout(function () { if (!finished) { finished = true; navigator.serviceWorker.removeEventListener('controllerchange', finish); resolve(false); } }, 10000);
+      });
+      await registration.update();
+      var worker = registration.installing || registration.waiting;
+      if (registration.waiting) registration.waiting.postMessage({ type: 'FC_SKIP_WAITING' });
+      if (worker) {
+        var activated = await new Promise(function (resolve) {
+          var done = false;
+          function finish(value) { if (done) return; done = true; worker.removeEventListener('statechange', onState); resolve(value); }
+          function onState() {
+            if (worker.state === 'activated') finish(true);
+            else if (worker.state === 'redundant') finish(false);
+          }
+          worker.addEventListener('statechange', onState);
+          onState();
+          setTimeout(function () { finish(worker.state === 'activated'); }, 10000);
+        });
+        if (!activated) throw new Error('El navegador no pudo activar la nueva versión.');
+        await Promise.race([controllerChanged, new Promise(function (resolve) { setTimeout(resolve, 2500); })]);
+        if (label) label.textContent = 'Actualización aplicada. Abriendo ' + APP_VERSION + '…';
+        setTimeout(function () { window.location.reload(); }, 350);
+        return;
+      }
+      var controllerWasChanged = await Promise.race([controllerChanged, new Promise(function (resolve) { setTimeout(function () { resolve(false); }, 2500); })]);
+      if (controllerWasChanged) {
+        if (label) label.textContent = 'Actualización aplicada. Abriendo ' + APP_VERSION + '…';
+        setTimeout(function () { window.location.reload(); }, 350);
+      } else if (label) label.textContent = 'Frecuencia Cero ya está actualizada · ' + APP_VERSION + '.';
+    } catch (err) {
+      if (label) label.textContent = 'No se pudo comprobar la actualización. Verifica Internet y vuelve a intentarlo.';
+      console.warn('Frecuencia Cero update check:', err);
+    } finally {
+      if (button) { button.disabled = false; button.textContent = '↻ Buscar actualizaciones'; }
+    }
+  }
+
   function initUi() {
     var menu = document.querySelector('#vm .menu-content');
     if (menu && !$('fcSyncPanel')) {
       var panel = document.createElement('section'); panel.id = 'fcSyncPanel'; panel.className = 'fc-sync-panel';
       panel.innerHTML = '<div class="fc-panel-head"><div><strong>Mi banda y sincronización</strong><p class="note">La primera vez eliges tu perfil. Para incorporar a otra persona, debe solicitar acceso y el propietario la aprueba. El QR sirve para vincular otro teléfono o tablet al mismo perfil.</p></div><span class="fc-panel-icon">☁️</span></div>' +
         '<div id="fcSyncStatus" class="fc-status neutral">Conectando con Firebase…</div>' +
-        '<div class="fc-band-box"><strong>Mi perfil en Frecuencia Cero</strong><label class="fc-field-label" for="fcProfileSelect">Selecciona quién utiliza este teléfono</label><select id="fcProfileSelect"><option value="">Seleccionar perfil…</option><option value="voice1">Voz 1 · Hombre (Director)</option><option value="voice2">Voz 2 · Mujer</option><option value="bass">Bajista</option><option value="accordionist">Acordeonista</option><option value="drummer">Baterista</option><option value="keyboardist">Tecladista</option></select><button id="fcProfileSave" class="p">Guardar mi perfil</button><p id="fcBandSummary" class="note">Selecciona tu perfil para continuar.</p><label class="fc-field-label" for="fcBandName">Nombre de la banda</label><input id="fcBandName" placeholder="Frecuencia Cero" value="Frecuencia Cero"><button id="fcCreateBand" class="p" style="display:none">Crear banda como propietario técnico</button><div id="fcOwnerMismatch" class="fc-pair-box" style="display:none"><strong>Este parece ser el primer dispositivo, pero el UID no coincide con el propietario configurado.</strong><p class="note">No necesitas QR para iniciar la banda. Copia este ID actual y actualizaremos la autorización de Firebase.</p><code id="fcCurrentOwnerUid"></code><button type="button" id="fcCopyCurrentOwnerUid">Copiar ID actual</button></div><button id="fcRequestJoin" class="p" style="display:none">Solicitar incorporación</button><p class="note">El primer teléfono del Acordeonista crea la banda como propietario técnico. Las demás personas eligen su función y solicitan incorporación; el propietario las aprueba. El QR se usa únicamente para vincular otro teléfono o tablet al mismo perfil. Voz 1 dirige los eventos.</p><div class="note">ID de este teléfono: <code id="fcDeviceUid">Preparando…</code> <button id="fcCopyUid" style="display:none">Copiar ID</button></div><div id="fcPairActions" class="fc-pair-actions"><div class="fc-member-head"><strong>Vincular otro dispositivo</strong></div><p id="fcPairHelp" class="note">El dispositivo autorizado genera el QR; el dispositivo nuevo lo escanea.</p><button id="fcLinkDevice" class="p" style="display:none">▦ Generar código QR</button><button id="fcScanDeviceLink" class="p" style="display:none">📷 Escanear código QR</button></div><div id="fcPairQrBox" class="fc-pair-box" style="display:none"></div><div id="fcPairScannerWrap" class="fc-pair-box" style="display:none"><div id="fcPairScanner"></div><p id="fcPairScannerStatus" class="note">Preparando cámara…</p><button type="button" id="fcPairScannerClose">Cerrar cámara</button></div></div>' +
+        '<div class="fc-band-box"><strong>Mi perfil en Frecuencia Cero</strong><label class="fc-field-label" for="fcProfileSelect">Selecciona quién utiliza este teléfono</label><select id="fcProfileSelect"><option value="">Seleccionar perfil…</option><option value="voice1">Voz 1 · Hombre (Director)</option><option value="voice2">Voz 2 · Mujer</option><option value="bass">Bajista</option><option value="accordionist">Acordeonista</option><option value="drummer">Baterista</option><option value="keyboardist">Tecladista</option></select><button id="fcProfileSave" class="p">Guardar mi perfil</button><p id="fcBandSummary" class="note">Selecciona tu perfil para continuar.</p><label class="fc-field-label" for="fcBandName">Nombre de la banda</label><input id="fcBandName" placeholder="Frecuencia Cero" value="Frecuencia Cero"><button id="fcCreateBand" class="p" style="display:none">Crear banda como propietario técnico</button><div id="fcOwnerMismatch" class="fc-pair-box" style="display:none"><strong>Este parece ser el primer dispositivo, pero el UID no coincide con el propietario configurado.</strong><p class="note">No necesitas QR para iniciar la banda. Copia este ID actual y actualizaremos la autorización de Firebase.</p><code id="fcCurrentOwnerUid"></code><button type="button" id="fcCopyCurrentOwnerUid">Copiar ID actual</button></div><button id="fcRequestJoin" class="p" style="display:none">Solicitar incorporación</button><p class="note">El propietario crea la banda primero. Una vez conectada, utiliza el botón independiente para generar un QR. Los demás integrantes solicitan acceso y el propietario los aprueba; un QR vincula otro teléfono al mismo perfil.</p><div class="note">ID de este teléfono: <code id="fcDeviceUid">Preparando…</code> <button id="fcCopyUid" style="display:none">Copiar ID</button></div><div id="fcPairActions" class="fc-pair-actions"><div class="fc-member-head"><strong>Vincular otro dispositivo</strong></div><p id="fcPairHelp" class="note">El dispositivo autorizado genera el QR; el dispositivo nuevo lo escanea.</p><button id="fcLinkDevice" type="button" style="display:none">▦ Generar código QR</button><button id="fcScanDeviceLink" class="p" style="display:none">📷 Escanear código QR</button></div><div id="fcPairQrBox" class="fc-pair-box" style="display:none"></div><div id="fcPairScannerWrap" class="fc-pair-box" style="display:none"><div id="fcPairScanner"></div><p id="fcPairScannerStatus" class="note">Preparando cámara…</p><button type="button" id="fcPairScannerClose">Cerrar cámara</button></div></div>' +
         '<div id="fcJoinRequests" class="fc-member-admin" style="display:none"><div class="fc-member-head"><strong>Solicitudes de integrantes</strong></div><div id="fcJoinRequestsList"></div></div>' +
         '<div id="fcMemberAdmin" class="fc-member-admin" style="display:none"><div class="fc-member-head"><strong>Integrantes y funciones (6 plazas)</strong><span id="fcOnlineCount" class="note"></span></div><p class="note">El propietario técnico administra el catálogo, integrantes y dispositivos. Voz 1 dirige los eventos y puede crear y organizar repertorios. Cada función se asigna a una sola persona.</p><div id="fcMembers"></div></div>' +
         '<div id="fcMyDevicesBox" class="fc-member-admin" style="display:none"><div class="fc-member-head"><strong>Mis dispositivos vinculados</strong></div><p class="note">Puedes vincular varios teléfonos o tablets a tu mismo perfil y revocar los que ya no utilices.</p><div id="fcMyDevices"></div></div>' +
@@ -1266,9 +1344,10 @@
     if ($('fcConnect')) $('fcConnect').onclick = connectFirebase;
     if ($('fcSignIn')) $('fcSignIn').onclick = signIn;
     if ($('fcSignOut')) $('fcSignOut').onclick = signOut;
-    if ($('fcCreateBand')) $('fcCreateBand').onclick = createBand;
+    if ($('fcCreateBand')) $('fcCreateBand').onclick = handleOwnerBandAction;
     if ($('fcRequestJoin')) $('fcRequestJoin').onclick = requestJoin;
     if ($('fcLinkDevice')) $('fcLinkDevice').onclick = handleGeneratePairQr;
+    if ($('fcCheckUpdates')) $('fcCheckUpdates').onclick = checkForAppUpdates;
     if ($('fcScanDeviceLink')) $('fcScanDeviceLink').onclick = startPairScanner;
     if ($('fcPairScannerClose')) $('fcPairScannerClose').onclick = stopPairScanner;
     if ($('fcProfileSave')) $('fcProfileSave').onclick = function () {
