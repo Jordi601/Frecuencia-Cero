@@ -1,38 +1,7 @@
-FRECUENCIA CERO V17 — REVOCACIÓN REAL DE ACCESO
+FRECUENCIA CERO V18
 
-CONTENIDO
-- index.html, fc-sync.js, sw.js y recursos de la PWA: se suben a la raíz del repositorio GitHub Pages.
-- FrecuenciaCero_V17_RealtimeDB_Rules.json: NO se sube como archivo de la página; se pega en Firebase → Realtime Database → Rules.
+Para actualizar: sube todos los archivos de esta carpeta a la raíz del repositorio GitHub Pages y confirma el cambio. Después, en cada dispositivo, usa Más → Buscar actualizaciones.
 
-INSTALACIÓN
-1. Haz una copia de seguridad de los archivos actuales del repositorio y de las reglas actuales de Firebase.
-2. Sube a la raíz de GitHub Pages los archivos de la aplicación que están en esta carpeta (index.html, fc-sync.js, sw.js, manifest y los iconos).
-3. En Firebase Console → Realtime Database → Rules, reemplaza las reglas por el contenido de FrecuenciaCero_V17_RealtimeDB_Rules.json y pulsa Publish. Estas reglas son parte necesaria de la revocación; no basta con actualizar GitHub.
-4. Conserva Authentication → Sign-in method → Anonymous habilitado. No borres la banda ni cambies el UID propietario.
-5. En cada dispositivo abre Más → Buscar actualizaciones. No borres datos de Safari ni elimines el acceso de la pantalla de inicio.
+No borres datos de Safari ni cierres la sesión de Firebase. No hace falta volver a pegar las reglas de Realtime Database: V18 es compatible con las reglas V17 ya publicadas.
 
-QUÉ CAMBIA
-- Al quitar un integrante, el propietario elimina de forma atómica su registro, dispositivos vinculados, presencia, solicitudes y QR pendientes. Si era Voz 1, también se detiene el estado en vivo.
-- El dispositivo activo escucha su propio registro de membresía. Cuando desaparece o Firebase rechaza el acceso, cierra listeners, detiene el lector/controles, borra la copia local descargada de canciones y eventos y muestra de nuevo la pantalla de perfil.
-- En el arranque de un dispositivo previamente vinculado, la app no carga la copia local del catálogo/eventos hasta que Firebase confirme que el perfil sigue autorizado; la pantalla de bloqueo cubre por completo el contenido.
-- La pantalla de reincorporación exige elegir función y enviar una nueva solicitud. El catálogo y eventos permanecen bloqueados hasta que el propietario apruebe y Firebase confirme el perfil.
-- Se conserva el UID anónimo del dispositivo retirado para que pueda solicitar acceso nuevamente; conservar ese UID NO conserva permisos.
-- Si se revoca solamente un dispositivo vinculado, ese dispositivo vuelve a la pantalla de vinculación y debe escanear un QR nuevo. Los otros dispositivos del integrante siguen activos.
-- La app bloquea el catálogo mientras comprueba al arrancar que un dispositivo previamente asociado siga autorizado.
-- Los QR pendientes dejan de ser válidos cuando su creador o el integrante propietario del perfil es revocado.
-
-LÍMITES IMPORTANTES
-- Firebase puede negar nuevas lecturas y escrituras después de la revocación. Una copia ya vista, capturada, exportada o guardada fuera de la aplicación no puede borrarse remotamente.
-- Si el dispositivo retirado está sin Internet o suspendido, no puede recibir la revocación en ese instante. Al reconectarse, Firebase niega el acceso y la app se bloquea antes de volver a mostrar el repertorio.
-- Las reglas de Realtime Database solo se publican en Firebase Console; no se activan por subir el ZIP a GitHub.
-
-PRUEBA RECOMENDADA
-1. Mantén abierto Frecuencia Cero en un dispositivo de prueba con un perfil distinto del propietario.
-2. Desde el iPhone propietario, abre Más → Integrantes y funciones → Quitar.
-3. Si el dispositivo de prueba está en línea, debe regresar a la pantalla de perfil, mostrar el aviso de acceso retirado y dejar de mostrar el catálogo/eventos.
-4. Desde Firebase, el usuario retirado debe dejar de poder leer /catalog, /events y /live.
-5. Elige otra vez su perfil desde el dispositivo retirado y solicita reincorporación; el catálogo solo vuelve cuando el propietario aprueba.
-6. Prueba también revocar un dispositivo secundario: ese dispositivo debe pedir un QR nuevo, mientras que el dispositivo principal del integrante permanece conectado.
-
-Versión: V17
-UID propietario configurado: qZCvhHTK3MUhcABIlZlRyrqHKdC2
+NOVEDAD: el enlace alternativo de vinculación ya no consume el QR al abrirse. Muestra una confirmación y solo reclama la invitación cuando se pulsa “Vincular este dispositivo”. La expiración se comprueba con la hora del servidor Firebase para evitar diferencias de reloj entre equipos. QR y enlace comparten el mismo token, de un solo uso y con vigencia de 3 minutos.

@@ -1,13 +1,25 @@
-Frecuencia Cero V17 — Revocación real de integrantes y dispositivos
+FRECUENCIA CERO V18 — ENLACE ALTERNATIVO DE VINCULACIÓN
 
-- Se detecta la eliminación del registro miembro/dispositivo en el listener propio y también los errores PERMISSION_DENIED del catálogo, eventos y estado en vivo.
-- El cliente revocado detiene controles y listeners, limpia la copia local de canciones/eventos y abre una pantalla bloqueante de perfil.
-- El usuario retirado debe elegir una función y solicitar reincorporación; el acceso no se restaura hasta una nueva aprobación.
-- La revocación conserva la identidad anónima Firebase, pero elimina la autorización de la banda.
-- La baja de integrante es una actualización atómica: miembro, dispositivos, presencia, solicitudes, QR pendientes y estado live si era Voz 1.
-- Revocar solo un dispositivo mantiene intacto al resto de dispositivos del mismo integrante y obliga al dispositivo retirado a escanear un QR nuevo.
-- Reglas RTDB endurecidas: acceso a catálogo/eventos/live/presencia requiere pertenencia vigente; los dispositivos secundarios dependen de que el miembro de referencia siga existiendo; QR requieren creador todavía autorizado.
-- Al iniciar, dispositivos previamente asociados esperan la verificación de pertenencia antes de desbloquear el catálogo.
-- Caché/Service Worker V17; UID propietario conservado.
+CAMBIOS
+- El enlace alternativo ahora abre una pantalla de confirmación. Cargar o previsualizar el enlace NO consume el token. El token se reclama solamente al pulsar “Vincular este dispositivo”.
+- Antes de reclamar, la aplicación consulta en Firebase si el navegador ya pertenece a un perfil o dispositivo. Esto evita que una sesión ya vinculada consuma por error una invitación destinada a otro equipo.
+- La hora de expiración se calcula con el desfase horario del servidor de Firebase (.info/serverTimeOffset), tanto al crear como al validar el enlace/QR. Esto evita falsos vencimientos por relojes desajustados entre dispositivos.
+- El QR y el enlace siguen utilizando la misma invitación de un solo uso y de 3 minutos. Si uno de ellos se utiliza correctamente, el otro deja de ser válido porque representa la misma invitación.
+- Se conserva la vinculación por escáner QR existente.
 
-Nota: las reglas V17 deben publicarse manualmente en Firebase Console. Subir solo los archivos a GitHub no activa la revocación del lado del servidor.
+INSTALACIÓN
+1. Sube todos los archivos de este paquete a la raíz de GitHub Pages, sustituyendo los anteriores.
+2. Publica el commit en la rama main.
+3. En cada dispositivo abre Frecuencia Cero → Más → Buscar actualizaciones.
+4. No es necesario volver a publicar reglas Firebase para este cambio: V18 usa las reglas V17 ya instaladas.
+5. No borres los datos de Safari ni elimines el acceso de la pantalla de inicio.
+
+PRUEBA RECOMENDADA
+1. En un dispositivo ya autorizado, genera un QR/enlace nuevo.
+2. Copia el enlace y ábrelo en un navegador de un dispositivo que todavía no esté vinculado.
+3. Debe aparecer una pantalla “Invitación a Frecuencia Cero” con el botón “Vincular este dispositivo”.
+4. La invitación solo se consume al pulsar ese botón.
+5. Abre el mismo enlace desde otro navegador sin pulsar vincular: la invitación debe seguir pendiente.
+6. Al completar la vinculación, el mismo enlace ya no se puede reutilizar.
+
+No se modifican UID, banda, integrantes, canciones ni eventos.

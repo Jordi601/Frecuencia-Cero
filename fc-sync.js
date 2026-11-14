@@ -4,7 +4,7 @@
 (function () {
   'use strict';
 
-  var APP_VERSION = 'V17';
+  var APP_VERSION = 'V18';
   var CFG_KEY = 'fc_firebase_config_v1';
   var BAND_KEY = 'fc_band_id_v1';
   var PROFILE_KEY = 'fc_device_profile_v1';
@@ -87,6 +87,10 @@
   var pairQrExpiryTimer = null;
   var pairScanner = null;
   var pairProcessing = false;
+  var pairInvitePromptToken = '';
+  var serverClockRef = null;
+  var serverClockOffsetMs = 0;
+  var serverClockReady = false;
   var browseOverride = false;
   var openingFromLive = false;
   var lastRemotePositionKey = '';
@@ -219,6 +223,32 @@
     renderMyDevices();
     renderJoinRequests();
   }
+  function startServerClock() {
+    if (!db || serverClockRef) return;
+    serverClockRef = db.ref('.info/serverTimeOffset');
+    serverClockRef.on('value', function (snap) {
+      var offset = Number(snap.val());
+      serverClockOffsetMs = Number.isFinite(offset) ? offset : 0;
+      serverClockReady = true;
+    });
+  }
+  function serverNow() { return Date.now() + serverClockOffsetMs; }
+  function waitForServerClock() {
+    startServerClock();
+    if (serverClockReady) return Promise.resolve();
+    return new Promise(function (resolve, reject) {
+      var started = Date.now();
+      function check() {
+        if (serverClockReady) { resolve(); return; }
+        if (Date.now() - started >= 5000) {
+          reject(new Error('No se pudo sincronizar la hora con Firebase. Revisa la conexión y vuelve a intentarlo.'));
+          return;
+        }
+        setTimeout(check, 50);
+      }
+      check();
+    });
+  }
   function configFromInput() { return FIREBASE_CONFIG; }
   function connectFirebase() {
     try {
@@ -226,6 +256,7 @@
       firebaseApp = firebase.apps.length ? firebase.app() : firebase.initializeApp(FIREBASE_CONFIG);
       auth = firebase.auth();
       db = firebase.database();
+      startServerClock();
       setStatus('Conectando de forma segura este teléfono…', 'success');
       auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(function () {});
       if (!authWatcherStarted) { auth.onAuthStateChanged(onAuthChanged); authWatcherStarted = true; }
@@ -556,8 +587,9 @@
       var canonicalMember = memberSnap.val();
       if (!canonicalMember || !canonicalMember.role || canonicalMember.role === 'pending') throw new Error('No se encontró la función actual de este integrante. Vuelve a conectar el perfil antes de generar el QR.');
       var pairingRole = canonicalMember.role;
+      await waitForServerClock();
       var token = randomTokenHex();
-      var expiresAt = Date.now() + 180000;
+      var expiresAt = serverNow() + 180000;
       var pairing = {
         role: pairingRole,
         memberUid: memberUid,
@@ -574,7 +606,14 @@
       box.innerHTML = '<div class="fc-pair-title">Vincular otro dispositivo</div><p class="note">Abre Frecuencia Cero en el otro teléfono o tablet y pulsa Escanear QR. Este QR vence en 3 minutos y solo sirve una vez.</p><div id="fcPairQrCanvas" class="fc-pair-qr"></div><div id="fcPairUrlText" class="fc-pair-url"></div><div id="fcPairCountdown" class="note">Válido durante 3:00</div><button type="button" id="fcPairCopy">Copiar enlace alternativo</button><button type="button" id="fcPairCancel">Cancelar QR</button>';
       box.style.display = '';
       var link = pairingUrl(token);
-      $('fcPairUrlText').textContent = link;
+      $('fcPairUrlText').innerHTML = '';
+      var invitationAnchor = document.createElement('a');
+      invitationAnchor.href = link;
+      invitationAnchor.textContent = 'Abrir enlace alternativo de invitación';
+      invitationAnchor.style.display = 'inline-block';
+      invitationAnchor.style.textDecoration = 'underline';
+      invitationAnchor.style.overflowWrap = 'anywhere';
+      $('fcPairUrlText').appendChild(invitationAnchor);
       if (window.QRCode) {
         new QRCode($('fcPairQrCanvas'), { text: link, width: 220, height: 220, colorDark: '#111827', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.M });
       } else {
@@ -588,10 +627,10 @@
         if (state.status === 'completed') { ref.remove().catch(function () {}); closePairQr('¡Dispositivo vinculado correctamente a ' + roleName(state.role) + '!'); }
         else if (state.status === 'claimed') setText('fcPairCountdown', 'QR escaneado. Terminando vinculación…');
       });
-      var end = Date.now() + 180000;
+      var end = expiresAt;
       function tick() {
         if (!pairQrToken || pairQrToken !== token) return;
-        var remain = Math.max(0, end - Date.now());
+        var remain = Math.max(0, end - serverNow());
         var total = Math.ceil(remain / 1000);
         setText('fcPairCountdown', 'Válido durante ' + Math.floor(total / 60) + ':' + String(total % 60).padStart(2, '0'));
         if (remain <= 0) { ref.remove().catch(function () {}); closePairQr('El QR venció. Genera uno nuevo cuando lo necesites.'); }
@@ -668,24 +707,105 @@
       return /^[a-f0-9]{48}$/i.test(String(text || '').trim()) ? String(text).trim() : '';
     }
   }
-  async function claimDevicePairing(token) {
-    if (pairProcessing) return;
+  async function assertDeviceCanBePaired() {
+    if (!currentUser || !db) throw new Error('Este dispositivo todavía no tiene identidad de Firebase.');
+    // Resuelve la identidad en el servidor antes de consumir el token. Evita la
+    // carrera entre onAuthStateChanged y los listeners de membresía/dispositivo.
+    var checks = await Promise.all([
+      db.ref('bands/' + FIXED_BAND_ID + '/members/' + currentUser.uid).once('value'),
+      db.ref('bands/' + FIXED_BAND_ID + '/devices/' + currentUser.uid).once('value')
+    ]);
+    var existingMember = checks[0].val();
+    var existingDevice = checks[1].val();
+    if (existingMember && existingMember.role) {
+      throw new Error('Este navegador ya tiene el perfil ' + roleName(existingMember.role) + '. El enlace es para un dispositivo nuevo, no para duplicar una sesión existente.');
+    }
+    if (existingDevice && existingDevice.memberUid) {
+      throw new Error('Este navegador ya está vinculado al perfil ' + roleName(existingDevice.role) + '. No necesitas usar otro enlace aquí.');
+    }
+    if (bandId || (memberProfile && memberProfile.role && memberProfile.role !== 'pending')) {
+      throw new Error('Este dispositivo ya está conectado a una banda. Para vincular otro equipo, abre el enlace en ese otro equipo.');
+    }
+  }
+  function clearPairTokenFromUrl() {
+    try {
+      var cleanUrl = new URL(window.location.href);
+      cleanUrl.searchParams.delete('fc_pair');
+      history.replaceState({}, '', cleanUrl.pathname + cleanUrl.search + cleanUrl.hash);
+    } catch (e) {}
+  }
+  function closeIncomingPairPrompt(removeToken) {
+    var prompt = $('fcPairInviteGate');
+    if (prompt) prompt.remove();
+    pairInvitePromptToken = '';
+    if (removeToken) clearPairTokenFromUrl();
+  }
+  function showIncomingPairPrompt(token) {
+    if (pairInvitePromptToken === token && $('fcPairInviteGate')) return;
+    closeIncomingPairPrompt(false);
+    pairInvitePromptToken = token;
+    var overlay = document.createElement('div');
+    overlay.id = 'fcPairInviteGate';
+    overlay.className = 'fc-pair-invite-overlay';
+    overlay.innerHTML = '<section class="fc-pair-invite-card" role="dialog" aria-modal="true" aria-labelledby="fcPairInviteTitle">' +
+      '<div class="fc-profile-brand">↔</div>' +
+      '<h2 id="fcPairInviteTitle">Invitación a Frecuencia Cero</h2>' +
+      '<p>Este enlace permite vincular este navegador a un perfil que ya existe. No se utilizará hasta que pulses el botón de confirmación.</p>' +
+      '<div class="fc-pair-invite-note">La invitación es de un solo uso y vence a los 3 minutos de haber sido generada. Se verificará con la hora del servidor de Firebase.</div>' +
+      '<p id="fcPairInviteStatus" class="fc-pair-invite-status" aria-live="polite">Conectando con Firebase para verificar la invitación…</p>' +
+      '<button type="button" id="fcPairInviteAccept" class="p">Vincular este dispositivo</button>' +
+      '<button type="button" id="fcPairInviteCancel">Cancelar</button>' +
+      '</section>';
+    document.body.appendChild(overlay);
+    var accept = $('fcPairInviteAccept');
+    if (accept) accept.onclick = async function () {
+      accept.disabled = true;
+      accept.textContent = 'Verificando invitación…';
+      var status = $('fcPairInviteStatus');
+      if (status) status.textContent = 'Comprobando que este navegador no esté vinculado y que el enlace siga vigente…';
+      var ok = await claimDevicePairing(token, true);
+      if (!ok && $('fcPairInviteGate')) {
+        accept.disabled = false;
+        accept.textContent = 'Volver a intentar';
+      }
+    };
+    var cancel = $('fcPairInviteCancel');
+    if (cancel) cancel.onclick = function () {
+      closeIncomingPairPrompt(true);
+      setStatus('Invitación cerrada. Puedes seleccionar un perfil o escanear un QR más tarde.', 'neutral');
+      maybeShowFirstProfileGate();
+    };
+  }
+  async function claimDevicePairing(token, fromLink) {
+    if (pairProcessing) return false;
     pairProcessing = true;
     try {
-      if (!currentUser || !db) throw new Error('Este dispositivo todavía no tiene identidad de Firebase.');
-      if (bandId) throw new Error('Este dispositivo ya está vinculado a una función.');
-      var pairRef = db.ref('bands/' + FIXED_BAND_ID + '/devicePairings/' + token);
+      if (!/^[a-f0-9]{48}$/i.test(String(token || ''))) throw new Error('El enlace no contiene un código de vinculación válido.');
+      await waitForServerClock();
+      await assertDeviceCanBePaired();
+      var pairRef = db.ref('bands/' + FIXED_BAND_ID + '/devicePairings/' + token.toLowerCase());
       var initial = await pairRef.once('value');
       var pair = initial.val();
-      if (!pair || pair.status !== 'pending' || Number(pair.expiresAt) <= Date.now()) throw new Error('El QR venció o ya fue utilizado. Genera uno nuevo desde el dispositivo original.');
+      if (!pair) throw new Error('La invitación ya no existe. Puede haberse cancelado o eliminado por el propietario. Genera un enlace nuevo.');
+      if (pair.status !== 'pending') {
+        throw new Error(pair.status === 'completed' ? 'Esta invitación ya se utilizó correctamente en otro dispositivo.' : 'Esta invitación ya fue reclamada por otro dispositivo. Genera un enlace nuevo.');
+      }
+      if (Number(pair.expiresAt) <= serverNow()) throw new Error('La invitación venció según la hora de Firebase. Genera un enlace nuevo.');
       var tx = await pairRef.transaction(function (current) {
-        if (!current || current.status !== 'pending' || Number(current.expiresAt) <= Date.now()) return;
+        if (!current || current.status !== 'pending' || Number(current.expiresAt) <= serverNow()) return;
         current.status = 'claimed';
         current.claimedBy = currentUser.uid;
         current.claimedAt = firebase.database.ServerValue.TIMESTAMP;
         return current;
       });
-      if (!tx.committed) throw new Error('Este QR ya fue utilizado o venció. Solicita uno nuevo.');
+      if (!tx.committed) {
+        var latestSnap = await pairRef.once('value');
+        var latest = latestSnap.val();
+        if (!latest) throw new Error('La invitación fue cancelada o eliminada. Genera una nueva.');
+        if (latest.status !== 'pending') throw new Error('La invitación ya fue utilizada o reclamada por otro dispositivo. Genera una nueva.');
+        if (Number(latest.expiresAt) <= serverNow()) throw new Error('La invitación venció según la hora del servidor. Genera una nueva.');
+        throw new Error('Firebase no pudo confirmar la invitación. Comprueba tu conexión e inténtalo otra vez con el mismo enlace.');
+      }
       pair = tx.snapshot.val();
       var device = {
         role: pair.role,
@@ -693,23 +813,48 @@
         memberUid: pair.memberUid,
         linkedFrom: pair.createdBy,
         linkedAt: firebase.database.ServerValue.TIMESTAMP,
-        pairingToken: token
+        pairingToken: token.toLowerCase()
       };
       await db.ref('bands/' + FIXED_BAND_ID + '/devices/' + currentUser.uid).set(device);
       await pairRef.update({ status: 'completed', completedAt: firebase.database.ServerValue.TIMESTAMP });
-      var cleanUrl = new URL(window.location.href); cleanUrl.searchParams.delete('fc_pair');
-      history.replaceState({}, '', cleanUrl.pathname + cleanUrl.search + cleanUrl.hash);
+      closeIncomingPairPrompt(false);
+      clearPairTokenFromUrl();
       setStatus('¡Este dispositivo quedó vinculado como ' + roleName(pair.role) + '!', 'success');
+      updateSyncButtons();
+      return true;
     } catch (err) {
-      setStatus('No se pudo vincular el dispositivo: ' + (err.message || err), 'error');
-      alert(err.message || 'No se pudo completar la vinculación.');
+      var message = err && err.code === 'PERMISSION_DENIED'
+        ? 'Firebase rechazó la vinculación. Comprueba que estén publicadas las reglas vigentes y que la banda siga autorizando al integrante que generó el enlace.'
+        : (err.message || 'No se pudo completar la vinculación.');
+      setStatus('No se pudo vincular el dispositivo: ' + message, 'error');
+      if (fromLink) {
+        var statusNode = $('fcPairInviteStatus');
+        if (statusNode) statusNode.textContent = message;
+      } else {
+        alert(message);
+      }
+      return false;
     } finally { pairProcessing = false; }
   }
   function maybeProcessIncomingPair() {
     if (!currentUser || !db || pairProcessing) return;
     var token = '';
     try { token = new URL(window.location.href).searchParams.get('fc_pair') || ''; } catch (e) {}
-    if (token) claimDevicePairing(token);
+    if (!token) return;
+    if (!/^[a-f0-9]{48}$/i.test(token)) {
+      showIncomingPairPrompt('');
+      var status = $('fcPairInviteStatus');
+      if (status) status.textContent = 'El enlace está incompleto o no es válido. Solicita uno nuevo al dispositivo que genera la invitación.';
+      var accept = $('fcPairInviteAccept'); if (accept) accept.disabled = true;
+      return;
+    }
+    // Abrir o previsualizar el enlace NO consume la invitación. La persona confirma
+    // explícitamente en el dispositivo de destino antes de reclamar el token.
+    showIncomingPairPrompt(token.toLowerCase());
+    waitForServerClock().then(function () {
+      var status = $('fcPairInviteStatus');
+      if (status && $('fcPairInviteGate')) status.textContent = 'Invitación lista. Pulsa «Vincular este dispositivo» para utilizarla.';
+    }).catch(function () {});
   }
   async function startPairScanner() {
     try {
@@ -1451,7 +1596,7 @@
         return;
       }
       var registration = await navigator.serviceWorker.getRegistration('./');
-      if (!registration) registration = await navigator.serviceWorker.register('./sw.js?v=17');
+      if (!registration) registration = await navigator.serviceWorker.register('./sw.js?v=18');
       var controllerChanged = new Promise(function (resolve) {
         var finished = false;
         var finish = function () {
@@ -1626,7 +1771,8 @@
       '.fc-status{padding:9px 11px;border-radius:10px;font-size:13px;font-weight:700;background:var(--bg)}.fc-status.success{color:#16764b;background:rgba(22,139,88,.10)}.fc-status.warning{color:#946200;background:rgba(220,160,30,.13)}.fc-status.error{color:#b3261e;background:rgba(179,38,30,.10)}' +
       '.fc-field-label{font-size:12px;color:var(--mut);font-weight:800;margin-top:3px}.fc-auth-row,.fc-invite-row{display:flex;gap:7px}.fc-auth-row button,.fc-invite-row button{flex:1;min-width:0}.fc-band-box{border-top:1px solid var(--line);padding-top:10px;display:flex;flex-direction:column;gap:8px}.fc-member-admin{border-top:1px solid var(--line);padding-top:10px}.fc-member-head{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:8px}.fc-member-row{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line)}.fc-member-info{flex:1;min-width:0}.fc-member-info strong,.fc-member-info small{display:block;overflow-wrap:anywhere}.fc-member-info small{font-size:11px;color:var(--mut)}.fc-member-row select{width:47%;min-width:128px;padding:7px;font-size:12px}.fc-sync-panel code{font-size:10px;overflow-wrap:anywhere}.fc-sync-panel #fcProfileSelect{width:100%}.fc-sync-panel #fcCopyUid{font-size:11px;min-height:30px;padding:4px 8px}.fc-follow-row{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700}.fc-follow-row input{width:18px;min-height:18px;height:18px}.fc-live-banner{width:calc(100% - 24px);margin:0 12px 8px;text-align:left;background:rgba(22,139,88,.12);border-color:rgba(22,139,88,.35);color:var(--fg);font-size:13px;font-weight:850;display:flex;align-items:center;gap:8px}.fc-live-banner span:nth-child(2){flex:1}.fc-live-dot{width:9px;height:9px;border-radius:100%;background:#16a36a;display:inline-block}.fc-role-bar{padding:8px 12px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:var(--bg)}.fc-role-line{display:flex;align-items:center;justify-content:space-between;gap:7px;width:100%;font-size:12px}.fc-role-line button{font-size:12px;min-height:36px;padding:6px 9px}.fc-role-bar select{min-height:38px;font-size:13px}.fc-next-only{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px 18px;gap:12px;overflow:auto}.fc-next-chip{padding:6px 12px;border-radius:20px;background:var(--acc);color:var(--accfg);font-weight:900;font-size:12px}.fc-next-caption{font-size:11px;color:var(--mut);font-weight:900;letter-spacing:.12em}.fc-next-current{font-size:clamp(25px,6vw,38px);font-weight:900;line-height:1.1}.fc-next-title{font-size:clamp(28px,8vw,48px);font-weight:950;color:var(--acc);line-height:1.08}.fc-next-key{font-size:14px;color:var(--mut);font-weight:800}.fc-event-selected-row{display:block}.fc-event-song-head{display:flex;align-items:center;gap:7px}.fc-assignment-controls{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:7px 3px 2px 29px}.fc-assignment-controls label{font-size:10px;color:var(--mut);font-weight:800}.fc-assignment-controls select{display:block;min-height:35px;font-size:12px;padding:5px;margin-top:3px}.fc-live-song{background:rgba(22,139,88,.09);border-radius:10px;padding-left:8px;padding-right:8px}.fc-play-song{font-size:12px;padding:7px 9px;min-height:36px}' +
       '.fc-member-device{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 8px 8px 28px;font-size:11px;color:var(--mut)}.fc-member-device button{min-height:30px;padding:4px 8px;font-size:11px}.fc-pair-actions{border:1px solid var(--line);border-radius:13px;padding:12px;background:var(--bg);display:flex;flex-direction:column;gap:9px}.fc-pair-actions p{margin:0}.fc-pair-actions button{width:100%;min-height:44px}.fc-pair-box{border:1px solid var(--line);border-radius:13px;padding:12px;background:var(--bg);display:flex;flex-direction:column;gap:9px}.fc-pair-title{font-size:16px;font-weight:900}.fc-pair-qr{display:flex;justify-content:center;align-items:center;background:#fff;border-radius:10px;padding:12px;min-height:230px}.fc-pair-qr img{max-width:100%;height:auto}.fc-pair-url{font-size:10px;color:var(--mut);overflow-wrap:anywhere;user-select:text}.fc-pair-box button{width:100%}' +
-      '.fc-live-row-current{outline:1px solid color-mix(in srgb,var(--acc) 25%,transparent);outline-offset:3px;border-radius:7px}.fc-profile-gate{position:fixed;inset:0;z-index:2000;display:grid;place-items:center;padding:18px;background:var(--bg);backdrop-filter:none}.fc-profile-card{width:min(100%,480px);max-height:90dvh;overflow:auto;background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:22px;padding:20px;box-shadow:0 18px 60px rgba(0,0,0,.3);display:flex;flex-direction:column;gap:12px}.fc-profile-brand{width:48px;height:48px;border-radius:15px;display:grid;place-items:center;background:var(--acc);color:var(--accfg);font-size:28px}.fc-profile-title{font-size:24px}.fc-profile-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.fc-profile-grid button{min-height:76px;text-align:left;display:flex;flex-direction:column;gap:4px;padding:11px}.fc-profile-grid button b{font-size:14px}.fc-profile-grid button small{color:var(--mut);font-size:11px}.fc-profile-foot{margin:0}.fc-request-row{display:grid;grid-template-columns:minmax(0,1fr);gap:9px;align-items:stretch}.fc-request-info{min-width:0;width:100%}.fc-request-info strong{white-space:normal;overflow-wrap:normal;word-break:normal}.fc-request-info small{white-space:normal;overflow-wrap:anywhere;word-break:normal;line-height:1.35}.fc-request-actions{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:7px;align-items:center;min-width:0}.fc-request-actions select{width:100%;min-width:0;max-width:100%;font-size:12px;padding:7px}.fc-request-actions button{min-width:0;white-space:nowrap}.fc-request-reject{padding-left:10px;padding-right:10px}.fc-admin-member-row{min-width:0}.fc-admin-member-row .fc-member-info{min-width:0}.fc-admin-member-row .fc-member-info small{overflow-wrap:normal;word-break:normal;line-height:1.35}.fc-section-control{display:grid;grid-template-columns:minmax(0,1fr) minmax(145px, .9fr);align-items:center;gap:9px;padding:8px 4px 3px 29px}.fc-section-key{font-size:11px;color:var(--mut);font-weight:800}.fc-section-control label{display:flex;align-items:center;gap:7px;justify-content:flex-end;font-size:11px;color:var(--mut);font-weight:800}.fc-section-control select{width:100%;min-width:0;min-height:36px;font-size:12px;padding:5px}.fc-category-filters{display:flex;gap:7px;overflow-x:auto;padding:9px 12px 4px;scrollbar-width:none}.fc-category-filters::-webkit-scrollbar{display:none}.fc-category-filters button{flex:1 0 auto;min-height:35px;padding:6px 12px;border-radius:11px;font-size:12px;font-weight:850;white-space:nowrap;background:var(--bg);color:var(--mut);box-shadow:none}.fc-category-filters button.active{background:var(--acc);color:var(--accfg)}.fc-mini-player{position:fixed;left:10px;right:10px;bottom:calc(8px + env(safe-area-inset-bottom));z-index:1100;display:flex;flex-direction:column;gap:5px;padding:9px 11px 7px;border:1px solid color-mix(in srgb,var(--acc) 38%,var(--line));border-radius:14px;background:color-mix(in srgb,var(--card) 94%,transparent);color:var(--fg);box-shadow:0 8px 26px rgba(0,0,0,.18);backdrop-filter:blur(12px)}body.fc-reader-open .fc-mini-player{bottom:calc(98px + env(safe-area-inset-bottom))}.fc-mini-top{display:flex;align-items:center;gap:6px;font-size:10px;font-weight:900;letter-spacing:.06em;color:var(--mut);min-width:0}.fc-mini-live-dot{width:8px;height:8px;border-radius:50%;background:#18a66a;flex:0 0 auto}.fc-mini-player.is-paused .fc-mini-live-dot{background:#d49b2e}.fc-mini-event{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;font-weight:700;letter-spacing:0}.fc-mini-state{white-space:nowrap}.fc-mini-main{display:flex;align-items:center;gap:9px;min-width:0}.fc-mini-copy{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}.fc-mini-copy strong{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.fc-mini-copy span{font-size:11px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.fc-mini-main button{min-height:35px;padding:6px 9px;font-size:11px;font-weight:850;white-space:nowrap}.fc-mini-player.is-free{border-color:color-mix(in srgb,#d49b2e 55%,var(--line))}.fc-mini-progress-track{height:3px;background:var(--line);border-radius:99px;overflow:hidden}.fc-mini-progress-track span{height:100%;display:block;width:0;background:var(--acc);transition:width .2s}.fc-mini-progress-text{position:absolute;right:11px;top:8px;font-size:9px;color:var(--mut);display:none}.fc-sync-panel .fc-request-row{display:grid;grid-template-columns:minmax(0,1fr);}.fc-sync-panel .fc-request-actions{grid-template-columns:minmax(0,1fr) auto auto}#list{padding-bottom:100px}.event-list{padding-bottom:100px}@media(max-width:480px){.fc-sync-panel .fc-request-actions{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.fc-sync-panel .fc-request-actions select{grid-column:1/-1}.fc-sync-panel .fc-request-actions button{width:100%;min-height:39px}.fc-sync-panel .fc-admin-member-row{display:grid;grid-template-columns:minmax(0,1fr);gap:7px}.fc-sync-panel .fc-admin-member-row select{width:100%;min-width:0;max-width:100%}.fc-sync-panel .fc-admin-member-row button{width:100%}.fc-section-control{grid-template-columns:1fr;gap:5px;padding-left:29px}.fc-section-control label{justify-content:space-between}.fc-section-control select{max-width:100%}}';
+      '.fc-live-row-current{outline:1px solid color-mix(in srgb,var(--acc) 25%,transparent);outline-offset:3px;border-radius:7px}.fc-profile-gate{position:fixed;inset:0;z-index:2000;display:grid;place-items:center;padding:18px;background:var(--bg);backdrop-filter:none}.fc-profile-card{width:min(100%,480px);max-height:90dvh;overflow:auto;background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:22px;padding:20px;box-shadow:0 18px 60px rgba(0,0,0,.3);display:flex;flex-direction:column;gap:12px}.fc-profile-brand{width:48px;height:48px;border-radius:15px;display:grid;place-items:center;background:var(--acc);color:var(--accfg);font-size:28px}.fc-profile-title{font-size:24px}.fc-profile-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.fc-profile-grid button{min-height:76px;text-align:left;display:flex;flex-direction:column;gap:4px;padding:11px}.fc-profile-grid button b{font-size:14px}.fc-profile-grid button small{color:var(--mut);font-size:11px}.fc-profile-foot{margin:0}.fc-request-row{display:grid;grid-template-columns:minmax(0,1fr);gap:9px;align-items:stretch}.fc-request-info{min-width:0;width:100%}.fc-request-info strong{white-space:normal;overflow-wrap:normal;word-break:normal}.fc-request-info small{white-space:normal;overflow-wrap:anywhere;word-break:normal;line-height:1.35}.fc-request-actions{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:7px;align-items:center;min-width:0}.fc-request-actions select{width:100%;min-width:0;max-width:100%;font-size:12px;padding:7px}.fc-request-actions button{min-width:0;white-space:nowrap}.fc-request-reject{padding-left:10px;padding-right:10px}.fc-admin-member-row{min-width:0}.fc-admin-member-row .fc-member-info{min-width:0}.fc-admin-member-row .fc-member-info small{overflow-wrap:normal;word-break:normal;line-height:1.35}.fc-section-control{display:grid;grid-template-columns:minmax(0,1fr) minmax(145px, .9fr);align-items:center;gap:9px;padding:8px 4px 3px 29px}.fc-section-key{font-size:11px;color:var(--mut);font-weight:800}.fc-section-control label{display:flex;align-items:center;gap:7px;justify-content:flex-end;font-size:11px;color:var(--mut);font-weight:800}.fc-section-control select{width:100%;min-width:0;min-height:36px;font-size:12px;padding:5px}.fc-category-filters{display:flex;gap:7px;overflow-x:auto;padding:9px 12px 4px;scrollbar-width:none}.fc-category-filters::-webkit-scrollbar{display:none}.fc-category-filters button{flex:1 0 auto;min-height:35px;padding:6px 12px;border-radius:11px;font-size:12px;font-weight:850;white-space:nowrap;background:var(--bg);color:var(--mut);box-shadow:none}.fc-category-filters button.active{background:var(--acc);color:var(--accfg)}.fc-mini-player{position:fixed;left:10px;right:10px;bottom:calc(8px + env(safe-area-inset-bottom));z-index:1100;display:flex;flex-direction:column;gap:5px;padding:9px 11px 7px;border:1px solid color-mix(in srgb,var(--acc) 38%,var(--line));border-radius:14px;background:color-mix(in srgb,var(--card) 94%,transparent);color:var(--fg);box-shadow:0 8px 26px rgba(0,0,0,.18);backdrop-filter:blur(12px)}body.fc-reader-open .fc-mini-player{bottom:calc(98px + env(safe-area-inset-bottom))}.fc-mini-top{display:flex;align-items:center;gap:6px;font-size:10px;font-weight:900;letter-spacing:.06em;color:var(--mut);min-width:0}.fc-mini-live-dot{width:8px;height:8px;border-radius:50%;background:#18a66a;flex:0 0 auto}.fc-mini-player.is-paused .fc-mini-live-dot{background:#d49b2e}.fc-mini-event{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;font-weight:700;letter-spacing:0}.fc-mini-state{white-space:nowrap}.fc-mini-main{display:flex;align-items:center;gap:9px;min-width:0}.fc-mini-copy{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}.fc-mini-copy strong{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.fc-mini-copy span{font-size:11px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.fc-mini-main button{min-height:35px;padding:6px 9px;font-size:11px;font-weight:850;white-space:nowrap}.fc-mini-player.is-free{border-color:color-mix(in srgb,#d49b2e 55%,var(--line))}.fc-mini-progress-track{height:3px;background:var(--line);border-radius:99px;overflow:hidden}.fc-mini-progress-track span{height:100%;display:block;width:0;background:var(--acc);transition:width .2s}.fc-mini-progress-text{position:absolute;right:11px;top:8px;font-size:9px;color:var(--mut);display:none}.fc-sync-panel .fc-request-row{display:grid;grid-template-columns:minmax(0,1fr);}.fc-sync-panel .fc-request-actions{grid-template-columns:minmax(0,1fr) auto auto}#list{padding-bottom:100px}.event-list{padding-bottom:100px}@media(max-width:480px){.fc-sync-panel .fc-request-actions{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.fc-sync-panel .fc-request-actions select{grid-column:1/-1}.fc-sync-panel .fc-request-actions button{width:100%;min-height:39px}.fc-sync-panel .fc-admin-member-row{display:grid;grid-template-columns:minmax(0,1fr);gap:7px}.fc-sync-panel .fc-admin-member-row select{width:100%;min-width:0;max-width:100%}.fc-sync-panel .fc-admin-member-row button{width:100%}.fc-section-control{grid-template-columns:1fr;gap:5px;padding-left:29px}.fc-section-control label{justify-content:space-between}.fc-section-control select{max-width:100%}}' +
+      '.fc-pair-invite-overlay{position:fixed;inset:0;z-index:3000;display:grid;place-items:center;padding:18px;background:rgba(8,13,22,.72);padding-top:calc(18px + env(safe-area-inset-top));padding-bottom:calc(18px + env(safe-area-inset-bottom))}.fc-pair-invite-card{width:min(100%,440px);max-height:calc(100dvh - 36px - env(safe-area-inset-top) - env(safe-area-inset-bottom));overflow:auto;background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:22px;padding:22px;box-shadow:0 20px 70px rgba(0,0,0,.38);display:flex;flex-direction:column;gap:13px}.fc-pair-invite-card h2{font-size:22px;line-height:1.15;margin:0}.fc-pair-invite-card p{margin:0;font-size:14px;line-height:1.45}.fc-pair-invite-note{padding:10px 12px;border-radius:11px;background:var(--bg);color:var(--mut);font-size:12px;line-height:1.45}.fc-pair-invite-status{padding:10px 12px;border-radius:10px;background:var(--bg);font-size:13px!important;font-weight:700}.fc-pair-invite-card button{width:100%;min-height:46px}.fc-pair-invite-card button:disabled{opacity:.55;cursor:wait}';
     var style = document.createElement('style'); style.textContent = css; document.head.appendChild(style);
   }
 

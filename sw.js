@@ -1,4 +1,4 @@
-const CACHE_NAME = 'frecuencia-cero-shell-v17-member-revocation-security';
+const CACHE_NAME = 'frecuencia-cero-shell-v18-invite-link-confirmation-server-clock';
 const APP_FILES = [
   './',
   './index.html',
