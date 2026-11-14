@@ -4,7 +4,7 @@
 (function () {
   'use strict';
 
-  var APP_VERSION = 'V18';
+  var APP_VERSION = 'V19';
   var CFG_KEY = 'fc_firebase_config_v1';
   var BAND_KEY = 'fc_band_id_v1';
   var PROFILE_KEY = 'fc_device_profile_v1';
@@ -791,22 +791,80 @@
         throw new Error(pair.status === 'completed' ? 'Esta invitación ya se utilizó correctamente en otro dispositivo.' : 'Esta invitación ya fue reclamada por otro dispositivo. Genera un enlace nuevo.');
       }
       if (Number(pair.expiresAt) <= serverNow()) throw new Error('La invitación venció según la hora de Firebase. Genera un enlace nuevo.');
-      var tx = await pairRef.transaction(function (current) {
-        if (!current || current.status !== 'pending' || Number(current.expiresAt) <= serverNow()) return;
-        current.status = 'claimed';
-        current.claimedBy = currentUser.uid;
-        current.claimedAt = firebase.database.ServerValue.TIMESTAMP;
-        return current;
-      });
+      // En algunos navegadores el SDK web puede iniciar la transacción con
+      // current === null aunque el once('value') inmediatamente anterior ya
+      // haya leído la invitación. Si devolvemos undefined en ese primer intento,
+      // Firebase aborta localmente y la invitación sigue pendiente. Usamos la
+      // lectura recién verificada como respaldo SOLO en la primera llamada; si
+      // el servidor devuelve null realmente, el hash de la transacción no
+      // coincide y el SDK vuelve a ejecutar el callback con el estado real.
+      async function claimPairTransaction(snapshotPair) {
+        var snapshotFallbackAvailable = true;
+        var abortReason = '';
+        var result = await pairRef.transaction(function (current) {
+          if (current == null && snapshotFallbackAvailable) {
+            current = Object.assign({}, snapshotPair);
+            snapshotFallbackAvailable = false;
+          }
+          if (!current) {
+            abortReason = 'Firebase no devolvió el estado actual de la invitación durante la transacción.';
+            return;
+          }
+          if (current.status !== 'pending') {
+            abortReason = 'La invitación cambió de estado antes de confirmarse.';
+            return;
+          }
+          if (Number(current.expiresAt) <= serverNow()) {
+            abortReason = 'La invitación venció según la hora del servidor.';
+            return;
+          }
+          var next = Object.assign({}, current);
+          next.status = 'claimed';
+          next.claimedBy = currentUser.uid;
+          next.claimedAt = firebase.database.ServerValue.TIMESTAMP;
+          return next;
+        }, undefined, false);
+        return { result: result, abortReason: abortReason };
+      }
+
+      var claimAttempt = await claimPairTransaction(pair);
+      var tx = claimAttempt.result;
       if (!tx.committed) {
+        // Releer y reintentar una sola vez si el token continúa pendiente.
+        // La regla de Firebase sigue controlando la transición y el uso único.
         var latestSnap = await pairRef.once('value');
         var latest = latestSnap.val();
         if (!latest) throw new Error('La invitación fue cancelada o eliminada. Genera una nueva.');
-        if (latest.status !== 'pending') throw new Error('La invitación ya fue utilizada o reclamada por otro dispositivo. Genera una nueva.');
-        if (Number(latest.expiresAt) <= serverNow()) throw new Error('La invitación venció según la hora del servidor. Genera una nueva.');
-        throw new Error('Firebase no pudo confirmar la invitación. Comprueba tu conexión e inténtalo otra vez con el mismo enlace.');
+        if (latest.status === 'claimed' && latest.claimedBy === currentUser.uid) {
+          pair = latest;
+        } else if (latest.status !== 'pending') {
+          throw new Error('La invitación ya fue utilizada o reclamada por otro dispositivo. Genera una nueva.');
+        } else if (Number(latest.expiresAt) <= serverNow()) {
+          throw new Error('La invitación venció según la hora del servidor. Genera una nueva.');
+        } else {
+          claimAttempt = await claimPairTransaction(latest);
+          tx = claimAttempt.result;
+          if (!tx.committed) {
+            var finalSnap = await pairRef.once('value');
+            var finalState = finalSnap.val();
+            if (finalState && finalState.status === 'claimed' && finalState.claimedBy === currentUser.uid) {
+              pair = finalState;
+            } else if (!finalState) {
+              throw new Error('La invitación desapareció durante la confirmación. Genera una nueva.');
+            } else if (finalState.status !== 'pending') {
+              throw new Error('La invitación ya fue utilizada o reclamada por otro dispositivo. Genera una nueva.');
+            } else if (Number(finalState.expiresAt) <= serverNow()) {
+              throw new Error('La invitación venció según la hora del servidor. Genera una nueva.');
+            } else {
+              throw new Error('La invitación sigue pendiente en Firebase, pero el navegador no pudo confirmar la transacción. ' + (claimAttempt.abortReason || 'Verifica la conexión y las reglas de vinculación de Realtime Database.'));
+            }
+          } else {
+            pair = tx.snapshot.val();
+          }
+        }
+      } else {
+        pair = tx.snapshot.val();
       }
-      pair = tx.snapshot.val();
       var device = {
         role: pair.role,
         name: ROLE_LABELS[pair.role] || 'Integrante',
@@ -824,7 +882,7 @@
       return true;
     } catch (err) {
       var message = err && err.code === 'PERMISSION_DENIED'
-        ? 'Firebase rechazó la vinculación. Comprueba que estén publicadas las reglas vigentes y que la banda siga autorizando al integrante que generó el enlace.'
+        ? 'Firebase rechazó una operación de vinculación (' + (err.code || 'PERMISSION_DENIED') + '). La invitación debe estar pendiente, su creador debe seguir autorizado y las reglas deben permitir reclamar el token y registrar el dispositivo.'
         : (err.message || 'No se pudo completar la vinculación.');
       setStatus('No se pudo vincular el dispositivo: ' + message, 'error');
       if (fromLink) {

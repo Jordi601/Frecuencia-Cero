@@ -1,4 +1,4 @@
-const CACHE_NAME = 'frecuencia-cero-shell-v18-invite-link-confirmation-server-clock';
+const CACHE_NAME = 'frecuencia-cero-shell-v19-invite-transaction-fix';
 const APP_FILES = [
   './',
   './index.html',

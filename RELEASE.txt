@@ -1,25 +1,25 @@
-FRECUENCIA CERO V18 — ENLACE ALTERNATIVO DE VINCULACIÓN
+FRECUENCIA CERO V19 — CORRECCIÓN DE CONFIRMACIÓN DEL ENLACE ALTERNATIVO
 
 CAMBIOS
-- El enlace alternativo ahora abre una pantalla de confirmación. Cargar o previsualizar el enlace NO consume el token. El token se reclama solamente al pulsar “Vincular este dispositivo”.
-- Antes de reclamar, la aplicación consulta en Firebase si el navegador ya pertenece a un perfil o dispositivo. Esto evita que una sesión ya vinculada consuma por error una invitación destinada a otro equipo.
-- La hora de expiración se calcula con el desfase horario del servidor de Firebase (.info/serverTimeOffset), tanto al crear como al validar el enlace/QR. Esto evita falsos vencimientos por relojes desajustados entre dispositivos.
-- El QR y el enlace siguen utilizando la misma invitación de un solo uso y de 3 minutos. Si uno de ellos se utiliza correctamente, el otro deja de ser válido porque representa la misma invitación.
-- Se conserva la vinculación por escáner QR existente.
+- Corregido el inicio de la transacción de reclamación de invitaciones. En determinados navegadores el SDK podía invocar el callback de la transacción con estado local null aunque la lectura previa ya hubiera devuelto la invitación pendiente; el callback abortaba localmente y mostraba “Firebase no pudo confirmar la invitación”.
+- La transacción usa la lectura reciente como respaldo solo en su primer estado local vacío. Firebase sigue verificando el hash y reejecuta el callback con el estado real del servidor cuando hay discrepancia.
+- Se añade un único reintento después de releer el token si continúa pendiente. El uso único sigue protegido por la transacción y por las reglas de Realtime Database.
+- Se mejora el mensaje de error para distinguir rechazo de reglas, vencimiento, token reclamado y fallo transaccional.
+- No se cambian UID, banda, miembros, dispositivos, catálogo, eventos ni reglas Firebase V17.
 
 INSTALACIÓN
-1. Sube todos los archivos de este paquete a la raíz de GitHub Pages, sustituyendo los anteriores.
+1. Sube todos los archivos de este paquete a la raíz del repositorio GitHub Pages, sustituyendo V18.
 2. Publica el commit en la rama main.
-3. En cada dispositivo abre Frecuencia Cero → Más → Buscar actualizaciones.
-4. No es necesario volver a publicar reglas Firebase para este cambio: V18 usa las reglas V17 ya instaladas.
+3. En cada dispositivo utiliza Más → Buscar actualizaciones.
+4. No es necesario volver a publicar reglas Firebase para esta corrección. Conserva las reglas V17 que ya publicaste.
 5. No borres los datos de Safari ni elimines el acceso de la pantalla de inicio.
 
-PRUEBA RECOMENDADA
-1. En un dispositivo ya autorizado, genera un QR/enlace nuevo.
-2. Copia el enlace y ábrelo en un navegador de un dispositivo que todavía no esté vinculado.
-3. Debe aparecer una pantalla “Invitación a Frecuencia Cero” con el botón “Vincular este dispositivo”.
-4. La invitación solo se consume al pulsar ese botón.
-5. Abre el mismo enlace desde otro navegador sin pulsar vincular: la invitación debe seguir pendiente.
-6. Al completar la vinculación, el mismo enlace ya no se puede reutilizar.
+PRUEBA
+1. Genera una invitación nueva (QR/enlace) desde el dispositivo autorizado.
+2. Abre el enlace en un navegador que no esté vinculado.
+3. Pulsa “Vincular este dispositivo”.
+4. Comprueba que el dispositivo aparezca en “Mis dispositivos vinculados”.
+5. Comprueba que el enlace quede inutilizable después de la vinculación.
 
-No se modifican UID, banda, integrantes, canciones ni eventos.
+NOTA
+QR y enlace alternativo comparten el mismo token de un solo uso con vigencia de 3 minutos. Esta versión debe probarse contra el proyecto Firebase real; el paquete no publica cambios en Firebase ni puede probar la conexión remota desde este entorno.

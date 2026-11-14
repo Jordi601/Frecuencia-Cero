@@ -1,7 +1,1 @@
-FRECUENCIA CERO V18
-
-Para actualizar: sube todos los archivos de esta carpeta a la raíz del repositorio GitHub Pages y confirma el cambio. Después, en cada dispositivo, usa Más → Buscar actualizaciones.
-
-No borres datos de Safari ni cierres la sesión de Firebase. No hace falta volver a pegar las reglas de Realtime Database: V18 es compatible con las reglas V17 ya publicadas.
-
-NOVEDAD: el enlace alternativo de vinculación ya no consume el QR al abrirse. Muestra una confirmación y solo reclama la invitación cuando se pulsa “Vincular este dispositivo”. La expiración se comprueba con la hora del servidor Firebase para evitar diferencias de reloj entre equipos. QR y enlace comparten el mismo token, de un solo uso y con vigencia de 3 minutos.
+Frecuencia Cero V19. Sube todos los archivos a la raíz del repositorio GitHub Pages. Conserva las reglas Firebase V17 y los datos actuales. No borres los datos del navegador del propietario. Después de publicar, actualiza cada dispositivo desde Más → Buscar actualizaciones. Esta versión corrige la transacción que confirma el enlace alternativo de invitación.
