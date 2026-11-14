@@ -1,4 +1,4 @@
-const CACHE_NAME = 'frecuencia-cero-shell-v20-catalog-sections';
+const CACHE_NAME = 'frecuencia-cero-shell-v21-catalog-sync-linked-owner';
 const APP_FILES = [
   './',
   './index.html',

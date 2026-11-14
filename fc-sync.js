@@ -54,6 +54,8 @@
   var authWatcherStarted = false;
   var lastCatalogJson = '';
   var lastEventsJson = '';
+  var catalogWriteQueue = Promise.resolve();
+  var catalogWriteQueuedJson = '';
   var currentUser = null;
   var bandId = ''; // Se fija al aprobar el dispositivo en la banda Frecuencia Cero
   var bandMeta = null;
@@ -1383,18 +1385,40 @@
     setText('fcOnlineCount', Object.keys(memberList || {}).length + '/6 integrantes · ' + online + ' en línea');
   }
 
-  // Las escrituras locales del director se publican en la base compartida.
+  // Guarda localmente y publica el catálogo compartido desde el propietario
+  // o desde uno de sus dispositivos QR vinculados. Las reglas Firebase deben
+  // autorizar explícitamente esos dispositivos en /catalog.
   window.save = function () {
     if (accessRevoked || accessVerificationPending) return;
     if (typeof originalSave === 'function') originalSave();
-    if (!applyingRemote && db && bandId && isTechnicalOwner()) {
-      var payload = mapById(window.songs || []), serialized = safeJson(payload);
-      // Evita volver a subir todo el catálogo al abrir una canción si nada cambió.
-      if (serialized !== lastCatalogJson) {
-        lastCatalogJson = serialized;
-        db.ref(bandPath('catalog')).set(payload).catch(function (err) { setStatus('Error al publicar el catálogo: ' + err.message, 'error'); });
-      }
+    if (applyingRemote || !db || !bandId) return;
+    if (!isTechnicalOwner()) {
+      setStatus('Este perfil no tiene permiso para modificar el catálogo compartido. Solicita al propietario que edite las canciones.', 'warning');
+      return;
     }
+    var payload = mapById(window.songs || []), serialized = safeJson(payload);
+    // No se marca como sincronizado hasta que Firebase confirma el set.
+    // La cola conserva el orden si se guardan varias canciones rápidamente.
+    if (serialized === lastCatalogJson || serialized === catalogWriteQueuedJson) return;
+    catalogWriteQueuedJson = serialized;
+    var targetBand = bandId;
+    catalogWriteQueue = catalogWriteQueue.catch(function () {}).then(function () {
+      if (accessRevoked || accessVerificationPending || !db || bandId !== targetBand) return;
+      return db.ref(bandPath('catalog')).set(payload).then(function () {
+        lastCatalogJson = serialized;
+        if (catalogWriteQueuedJson === serialized) catalogWriteQueuedJson = '';
+        setStatus('Catálogo guardado y sincronizado con Firebase.', 'success');
+      }).catch(function (err) {
+        if (catalogWriteQueuedJson === serialized) catalogWriteQueuedJson = '';
+        var detail = err && err.code === 'PERMISSION_DENIED'
+          ? 'Firebase rechazó la escritura del catálogo desde este dispositivo vinculado. Publica las reglas V21 de Realtime Database para permitir al dispositivo QR del propietario.'
+          : 'No se pudo publicar el catálogo: ' + (err && err.message ? err.message : 'error de conexión.');
+        setStatus(detail, 'error');
+        if (err && err.code === 'PERMISSION_DENIED' && $('ve') && $('ve').classList.contains('on')) {
+          alert('La canción quedó guardada solamente en este navegador; no se sincronizó con los demás dispositivos. ' + detail);
+        }
+      });
+    });
   };
   window.saveEvents = function () {
     if (accessRevoked || accessVerificationPending) return;

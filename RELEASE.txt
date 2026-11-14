@@ -1,32 +1,30 @@
-FRECUENCIA CERO V20 — BLOQUES DE CATÁLOGO ACORDEÓN / TECLADO
+FRECUENCIA CERO V21 — SINCRONIZACIÓN DEL CATÁLOGO DESDE DISPOSITIVO VINCULADO
+
+CAUSA CORREGIDA
+- En V20, el cliente permitía que un dispositivo QR vinculado al perfil propietario gestionara el catálogo, pero las reglas Firebase V17 no autorizaban la escritura de /catalog desde ese UID anónimo secundario.
+- Por ello, el guardado local podía parecer correcto mientras Firebase rechazaba la publicación y los demás dispositivos no recibían la canción.
 
 CAMBIOS
-- Se añade al formulario de alta/edición de canción un selector independiente “Bloque principal del repertorio”: Acordeón o Teclado. Está junto al campo de tono, accesible desde el botón + del catálogo.
-- El catálogo principal ahora muestra dos bloques permanentes: ACORDEÓN y TECLADO. Dentro de cada uno agrupa canciones por tono (Sol, Fa, Do, Sib, Re, La, menores y Sin tonalidad).
-- Todas las canciones previas sin clasificación se migran al bloque Acordeón. No se cambian sus tonos, letras, acordes ni IDs.
-- Las canciones nuevas se guardan con la selección realizada y sincronizan el campo section en Firebase Realtime Database.
-- La búsqueda del catálogo incluye título, letra, tono y nombre del bloque.
-- Los selectores del evento agrupan por Acordeón/Teclado y tono.
-- Las asignaciones de evento heredan por defecto el bloque global de la canción. Se puede elegir una excepción por evento, o volver a “Según bloque del catálogo”.
-- Los enlaces compartidos de eventos incluyen el bloque de cada canción.
-- Actualización de caché y etiqueta de aplicación a V20.
-
-COMPATIBILIDAD
-- Se conserva el UID del propietario y la banda existente.
-- No requiere cambiar reglas de Firebase. El catálogo sigue sincronizándose por el mismo nodo Realtime Database; se añade una propiedad de datos “section”.
-- Las canciones de catálogos antiguos sin section se interpretan como Acordeón.
+- Reglas: /catalog permite escribir al UID propietario o a un dispositivo cuyo registro vigente en /devices/<auth.uid> tenga memberUid igual al UID propietario, y mientras el perfil propietario exista con role accordionist e isOwner=true.
+- Revocar el registro del dispositivo elimina automáticamente este permiso.
+- El cliente publica el catálogo mediante una cola para respetar el orden de guardados.
+- El cliente solo marca el catálogo como sincronizado después de recibir confirmación de Firebase.
+- Ante PERMISSION_DENIED muestra un aviso explícito en lugar de aparentar sincronización.
+- El selector de bloque Acordeón/Teclado y la vista en dos bloques de V20 se conservan.
+- Versión y caché actualizadas a V21.
 
 INSTALACIÓN
-1. Sube todos los archivos del ZIP a la raíz del repositorio GitHub Pages y sustituye los anteriores.
-2. Publica el commit en main.
-3. En iPhone/laptop usa Más → Buscar actualizaciones.
+1. Sube todos los archivos de este ZIP a la raíz del repositorio GitHub Pages.
+2. En Firebase Console > Realtime Database > Rules, publica el archivo RealtimeDB_Rules_V21.json incluido aquí.
+3. Actualiza iPhone y laptop desde Más > Buscar actualizaciones.
+
+IMPORTANTE
+- No modifica canciones, eventos, integrantes ni UID.
+- No abre la escritura general de la banda: la escritura del catálogo se concede solo al UID propietario y a dispositivos QR vigentes vinculados a ese propietario.
+- Antes de publicar, conserva una copia de las reglas actuales.
 
 PRUEBA
-1. En el catálogo pulsa +.
-2. Crea una canción de prueba, elige un tono y selecciona Teclado.
-3. Guarda y vuelve al catálogo: debe aparecer en TECLADO → TONO elegido.
-4. Edita la canción y cambia el bloque; debe trasladarse entre los bloques.
-5. Abre un evento y comprueba que hereda el bloque, salvo que elijas una excepción manual.
-
-VALIDACIÓN
-Se validan sintaxis JS, existencia del selector, migración de canciones antiguas, guardado del campo section y estructura del ZIP. La sincronización Firebase en tiempo real requiere prueba en el proyecto real.
+1. En la laptop vinculada al Acordeonista, crea una canción de prueba.
+2. Selecciona un tono y el bloque Teclado.
+3. Guarda. Debe aparecer en Teclado > tono elegido en laptop e iPhone.
+4. En Más > Mi banda revisa el estado; debe indicar que el catálogo está sincronizado.
