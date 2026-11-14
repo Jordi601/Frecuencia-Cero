@@ -1,4 +1,4 @@
-const CACHE_NAME = 'frecuencia-cero-shell-v19-invite-transaction-fix';
+const CACHE_NAME = 'frecuencia-cero-shell-v20-catalog-sections';
 const APP_FILES = [
   './',
   './index.html',

@@ -1,25 +1,32 @@
-FRECUENCIA CERO V19 — CORRECCIÓN DE CONFIRMACIÓN DEL ENLACE ALTERNATIVO
+FRECUENCIA CERO V20 — BLOQUES DE CATÁLOGO ACORDEÓN / TECLADO
 
 CAMBIOS
-- Corregido el inicio de la transacción de reclamación de invitaciones. En determinados navegadores el SDK podía invocar el callback de la transacción con estado local null aunque la lectura previa ya hubiera devuelto la invitación pendiente; el callback abortaba localmente y mostraba “Firebase no pudo confirmar la invitación”.
-- La transacción usa la lectura reciente como respaldo solo en su primer estado local vacío. Firebase sigue verificando el hash y reejecuta el callback con el estado real del servidor cuando hay discrepancia.
-- Se añade un único reintento después de releer el token si continúa pendiente. El uso único sigue protegido por la transacción y por las reglas de Realtime Database.
-- Se mejora el mensaje de error para distinguir rechazo de reglas, vencimiento, token reclamado y fallo transaccional.
-- No se cambian UID, banda, miembros, dispositivos, catálogo, eventos ni reglas Firebase V17.
+- Se añade al formulario de alta/edición de canción un selector independiente “Bloque principal del repertorio”: Acordeón o Teclado. Está junto al campo de tono, accesible desde el botón + del catálogo.
+- El catálogo principal ahora muestra dos bloques permanentes: ACORDEÓN y TECLADO. Dentro de cada uno agrupa canciones por tono (Sol, Fa, Do, Sib, Re, La, menores y Sin tonalidad).
+- Todas las canciones previas sin clasificación se migran al bloque Acordeón. No se cambian sus tonos, letras, acordes ni IDs.
+- Las canciones nuevas se guardan con la selección realizada y sincronizan el campo section en Firebase Realtime Database.
+- La búsqueda del catálogo incluye título, letra, tono y nombre del bloque.
+- Los selectores del evento agrupan por Acordeón/Teclado y tono.
+- Las asignaciones de evento heredan por defecto el bloque global de la canción. Se puede elegir una excepción por evento, o volver a “Según bloque del catálogo”.
+- Los enlaces compartidos de eventos incluyen el bloque de cada canción.
+- Actualización de caché y etiqueta de aplicación a V20.
+
+COMPATIBILIDAD
+- Se conserva el UID del propietario y la banda existente.
+- No requiere cambiar reglas de Firebase. El catálogo sigue sincronizándose por el mismo nodo Realtime Database; se añade una propiedad de datos “section”.
+- Las canciones de catálogos antiguos sin section se interpretan como Acordeón.
 
 INSTALACIÓN
-1. Sube todos los archivos de este paquete a la raíz del repositorio GitHub Pages, sustituyendo V18.
-2. Publica el commit en la rama main.
-3. En cada dispositivo utiliza Más → Buscar actualizaciones.
-4. No es necesario volver a publicar reglas Firebase para esta corrección. Conserva las reglas V17 que ya publicaste.
-5. No borres los datos de Safari ni elimines el acceso de la pantalla de inicio.
+1. Sube todos los archivos del ZIP a la raíz del repositorio GitHub Pages y sustituye los anteriores.
+2. Publica el commit en main.
+3. En iPhone/laptop usa Más → Buscar actualizaciones.
 
 PRUEBA
-1. Genera una invitación nueva (QR/enlace) desde el dispositivo autorizado.
-2. Abre el enlace en un navegador que no esté vinculado.
-3. Pulsa “Vincular este dispositivo”.
-4. Comprueba que el dispositivo aparezca en “Mis dispositivos vinculados”.
-5. Comprueba que el enlace quede inutilizable después de la vinculación.
+1. En el catálogo pulsa +.
+2. Crea una canción de prueba, elige un tono y selecciona Teclado.
+3. Guarda y vuelve al catálogo: debe aparecer en TECLADO → TONO elegido.
+4. Edita la canción y cambia el bloque; debe trasladarse entre los bloques.
+5. Abre un evento y comprueba que hereda el bloque, salvo que elijas una excepción manual.
 
-NOTA
-QR y enlace alternativo comparten el mismo token de un solo uso con vigencia de 3 minutos. Esta versión debe probarse contra el proyecto Firebase real; el paquete no publica cambios en Firebase ni puede probar la conexión remota desde este entorno.
+VALIDACIÓN
+Se validan sintaxis JS, existencia del selector, migración de canciones antiguas, guardado del campo section y estructura del ZIP. La sincronización Firebase en tiempo real requiere prueba en el proyecto real.

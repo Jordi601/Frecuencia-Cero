@@ -4,7 +4,7 @@
 (function () {
   'use strict';
 
-  var APP_VERSION = 'V19';
+  var APP_VERSION = 'V20';
   var CFG_KEY = 'fc_firebase_config_v1';
   var BAND_KEY = 'fc_band_id_v1';
   var PROFILE_KEY = 'fc_device_profile_v1';
@@ -514,7 +514,10 @@
       if (accessRevoked || accessVerificationPending) return;
       var data = snap.val() || {};
       applyingRemote = true;
-      window.songs = objectValues(data).sort(function (a, b) { return (a.catalogOrder == null ? 999999 : a.catalogOrder) - (b.catalogOrder == null ? 999999 : b.catalogOrder); });
+      window.songs = objectValues(data).map(function (song) {
+        if (song.section !== 'keyboard' && song.section !== 'accordion') song.section = 'accordion';
+        return song;
+      }).sort(function (a, b) { return (a.catalogOrder == null ? 999999 : a.catalogOrder) - (b.catalogOrder == null ? 999999 : b.catalogOrder); });
       lastCatalogJson = safeJson(mapById(window.songs));
       localSaveSongs(); applyingRemote = false;
       if (typeof window.render === 'function') window.render();
@@ -1105,15 +1108,24 @@
       });
     });
   }
-  function eventAssignmentDefaults() { return { section: 'accordion' }; }
+  function catalogSongSection(songId) {
+    var song = window.find ? window.find(songId) : null;
+    return song && song.section === 'keyboard' ? 'keyboard' : 'accordion';
+  }
+  function eventAssignmentDefaults(songId) { return { section: catalogSongSection(songId), manualSection: false }; }
   function getCurrentEvent() { return (window.events || []).find(function (ev) { return ev.id === window.currentEventId; }) || null; }
   function getSongSection(songId, eventOverride) {
     var ev = eventOverride || getCurrentEvent();
     var assignment = ev && ev.assignments && ev.assignments[songId] || {};
-    if (assignment.section === 'keyboard' || assignment.section === 'accordion') return assignment.section;
+    // Las asignaciones nuevas heredan del catálogo. Solo una selección explícita dentro
+    // del evento puede sustituir temporalmente el bloque principal de la canción.
+    if (assignment.manualSection === true && (assignment.section === 'keyboard' || assignment.section === 'accordion')) return assignment.section;
+    // En V19, las canciones marcadas como Teclado en un evento eran selecciones manuales;
+    // se conservan como excepción. Los valores Acordeón antiguos eran el valor por defecto.
+    if (assignment.manualSection == null && assignment.section === 'keyboard') return 'keyboard';
     // Compatibilidad con eventos V15 que ya tenían asignaciones independientes por perfil.
-    if (assignment.accordionist === 'guitar' && assignment.keyboardist === 'keyboard') return 'keyboard';
-    return 'accordion';
+    if (assignment.manualSection == null && !assignment.section && assignment.accordionist === 'guitar' && assignment.keyboardist === 'keyboard') return 'keyboard';
+    return catalogSongSection(songId);
   }
   function getAssignment(songId, roleKey) {
     var ev = getCurrentEvent();
@@ -1422,10 +1434,16 @@
     window.eventDraftSongIds = ev ? (ev.songIds || []).slice() : [];
     eventDraftAssignments = ev && ev.assignments ? JSON.parse(JSON.stringify(ev.assignments)) : {};
     window.eventDraftSongIds.forEach(function (songId) {
-      if (!eventDraftAssignments[songId]) eventDraftAssignments[songId] = eventAssignmentDefaults();
+      if (!eventDraftAssignments[songId]) eventDraftAssignments[songId] = eventAssignmentDefaults(songId);
       var assignment = eventDraftAssignments[songId];
       if (assignment.section !== 'accordion' && assignment.section !== 'keyboard') {
-        assignment.section = (assignment.accordionist === 'guitar' && assignment.keyboardist === 'keyboard') ? 'keyboard' : 'accordion';
+        assignment.section = catalogSongSection(songId);
+        assignment.manualSection = false;
+      } else if (assignment.manualSection == null) {
+        // Migración segura desde V19: Teclado se conserva como excepción manual;
+        // Acordeón se considera el valor heredado por defecto del catálogo antiguo.
+        assignment.manualSection = assignment.section === 'keyboard';
+        if (!assignment.manualSection) assignment.section = catalogSongSection(songId);
       }
     });
     $('eventEditorHeading').textContent = ev ? 'Editar evento' : 'Nuevo evento';
@@ -1454,13 +1472,18 @@
       keyMeta.textContent = s && s.key ? 'Tono ' + displayKeyName(s.key) : 'Tono no especificado';
       var sectionLabel = document.createElement('label'); sectionLabel.textContent = 'Bloque del repertorio';
       var section = document.createElement('select'); section.setAttribute('aria-label', 'Bloque musical de ' + (s ? s.title : 'la canción'));
-      [['accordion','🪗 Acordeón'],['keyboard','🎹 Teclado']].forEach(function (item) { var option = document.createElement('option'); option.value = item[0]; option.textContent = item[1]; section.appendChild(option); });
-      var existing = eventDraftAssignments[id] || eventAssignmentDefaults();
-      if (existing.section !== 'accordion' && existing.section !== 'keyboard') existing.section = 'accordion';
-      section.value = existing.section;
+      [['auto','Según bloque del catálogo'],['accordion','🪗 Acordeón'],['keyboard','🎹 Teclado']].forEach(function (item) { var option = document.createElement('option'); option.value = item[0]; option.textContent = item[1]; section.appendChild(option); });
+      var existing = eventDraftAssignments[id] || eventAssignmentDefaults(id);
+      section.value = existing.manualSection === true ? existing.section : 'auto';
       section.onchange = function () {
-        if (!eventDraftAssignments[id]) eventDraftAssignments[id] = eventAssignmentDefaults();
-        eventDraftAssignments[id].section = section.value;
+        if (!eventDraftAssignments[id]) eventDraftAssignments[id] = eventAssignmentDefaults(id);
+        if (section.value === 'auto') {
+          eventDraftAssignments[id].manualSection = false;
+          eventDraftAssignments[id].section = catalogSongSection(id);
+        } else {
+          eventDraftAssignments[id].manualSection = true;
+          eventDraftAssignments[id].section = section.value;
+        }
         // Al cambiar el bloque, limpia excepciones previas para que se aplique la regla automática.
         var prefix = (window.currentEventId || 'catalog') + ':' + id + ':';
         delete instrumentOverrides[prefix + 'accordionist'];
@@ -1478,7 +1501,7 @@
     var ev = window.eventEditId ? window.findEvent(window.eventEditId) : null;
     if (!ev) { ev = { id: 'evt_' + Date.now(), name: name, songIds: [], assignments: {}, createdAt: Date.now() }; window.events.push(ev); }
     ev.name = name; ev.songIds = window.eventDraftSongIds.slice(); ev.assignments = {};
-    ev.songIds.forEach(function (id) { ev.assignments[id] = eventDraftAssignments[id] || eventAssignmentDefaults(); });
+    ev.songIds.forEach(function (id) { ev.assignments[id] = eventDraftAssignments[id] || eventAssignmentDefaults(id); });
     ev.updatedAt = Date.now(); window.saveEvents(); window.renderEvents(); window.currentEventId = ev.id; window.openEvent(ev.id);
   };
 

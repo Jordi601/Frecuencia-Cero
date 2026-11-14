@@ -1,1 +1,3 @@
-Frecuencia Cero V19. Sube todos los archivos a la raíz del repositorio GitHub Pages. Conserva las reglas Firebase V17 y los datos actuales. No borres los datos del navegador del propietario. Después de publicar, actualiza cada dispositivo desde Más → Buscar actualizaciones. Esta versión corrige la transacción que confirma el enlace alternativo de invitación.
+FRECUENCIA CERO V20 — CATÁLOGO POR BLOQUES
+
+Sube todos los archivos del ZIP a la raíz de GitHub Pages y sustituye los anteriores. Después usa Más → Buscar actualizaciones en cada dispositivo. No se modifican las reglas de Firebase ni el UID de propietario.

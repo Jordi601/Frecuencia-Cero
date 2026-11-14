@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#f3f5f7">
-<meta name="fc-build" content="live-sync-v19-transaction-initial-state-fix">
+<meta name="fc-build" content="catalog-sections-v20">
 <title>Frecuencia Cero – Letras y acordes</title>
 <meta name="application-name" content="Frecuencia Cero">
 <meta name="apple-mobile-web-app-title" content="Frecuencia Cero">
@@ -23,7 +23,12 @@ header{display:flex;gap:8px;padding:10px 12px;align-items:center}
 input,textarea,select{width:100%;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:11px 13px;min-height:44px}
 #q{font-size:17px}.tabs{display:flex;gap:8px;padding:0 12px 8px}.tabs button{flex:1;padding:8px 5px}.tabs button.on{background:var(--fg);color:var(--bg)}
 #list{flex:1;overflow-y:auto;padding:0 12px 24px;-webkit-overflow-scrolling:touch}
-.list-group{padding:12px 4px 5px;color:var(--acc);font-size:11px;font-weight:950;letter-spacing:.12em;border-bottom:1px solid var(--line)}.row{display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--line)}.row .t{flex:1;min-width:0;display:flex;align-items:center;justify-content:space-between;gap:10px;text-align:left;background:none;border:0;font-size:16px;padding:11px 4px;min-height:48px}.song-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.song-key{font-size:11px;font-weight:800;color:var(--mut);border:1px solid var(--line);border-radius:8px;padding:3px 7px;white-space:nowrap}.row .s{background:none;border:0;font-size:25px;color:var(--mut);padding:7px 11px}.row .s.on{color:var(--acc)}
+.catalog-section-heading{display:flex;align-items:center;gap:9px;margin:15px 0 3px;padding:10px 11px;border:1px solid var(--line);border-radius:12px;background:var(--card);color:var(--fg);font-size:14px;font-weight:950;letter-spacing:.045em}
+.catalog-section-heading:first-child{margin-top:5px}
+.catalog-section-heading .catalog-section-count{margin-left:auto;color:var(--mut);font-size:10px;font-weight:800;letter-spacing:0}
+.list-group{padding:10px 5px 4px 13px;color:var(--acc);font-size:11px;font-weight:950;letter-spacing:.12em;border-bottom:1px solid var(--line);margin-top:2px}
+.catalog-section-empty{padding:10px 13px 13px;color:var(--mut);font-size:12px;border-bottom:1px solid var(--line)}
+.row{display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--line)}.row .t{flex:1;min-width:0;display:flex;align-items:center;justify-content:space-between;gap:10px;text-align:left;background:none;border:0;font-size:16px;padding:11px 4px;min-height:48px}.song-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.song-key{font-size:11px;font-weight:800;color:var(--mut);border:1px solid var(--line);border-radius:8px;padding:3px 7px;white-space:nowrap}.row .s{background:none;border:0;font-size:25px;color:var(--mut);padding:7px 11px}.row .s.on{color:var(--acc)}
 .empty{color:var(--mut);padding:30px 8px;text-align:center;line-height:1.5}.note{color:var(--mut);font-size:13px;line-height:1.45}
 #rd{flex:1;overflow-y:auto;padding:12px 20px 45vh;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
 #rh{font-size:1.1em;color:var(--acc);margin:0 0 .25em}#rmeta{font-size:12px;color:var(--mut);margin:0 0 1em;line-height:1.45}
@@ -347,9 +352,12 @@ body{
   <h2 id="editorHeading" style="margin:0 0 2px;font-size:19px">Agregar canción</h2>
   <label class="note" for="et">Nombre de la canción</label>
   <input id="et" placeholder="Ej. Yaquesita">
-  <label class="note" for="ekey">Tono / bloque del catálogo</label>
+  <label class="note" for="ekey">Tono de la canción</label>
   <select id="ekey"><option value="">Sin especificar</option><option>Sol</option><option>Fa</option><option>Do</option><option>Sib</option><option>Re</option><option>La</option><option>Solm</option><option value="Sim">Si menor (Sim / Bm)</option><option value="Am">La menor (Lam / Am)</option></select>
-  <p class="note">El tono que elijas coloca la canción automáticamente en su bloque correspondiente del catálogo.</p>
+  <p class="note">El tono crea un subgrupo dentro del bloque musical que elijas abajo.</p>
+  <label class="note" for="esection">Bloque principal del repertorio</label>
+  <select id="esection"><option value="accordion">🪗 Acordeón</option><option value="keyboard">🎹 Teclado</option></select>
+  <p class="note">Las canciones anteriores se conservan en Acordeón. Para las nuevas, selecciona Teclado cuando corresponda.</p>
   <label class="note" for="eduration">Duración aproximada (mm:ss)</label>
   <input id="eduration" inputmode="numeric" placeholder="03:20" aria-label="Duración aproximada en minutos y segundos">
   <p class="note">Es una estimación para planear el evento, no un cronómetro exacto. Puedes ajustarla a la duración real que suele tocar el grupo.</p>
@@ -378,7 +386,7 @@ body{
   </div>
   <p id="mmsg" class="note" aria-live="polite"></p>
   <div class="fc-app-meta">
-   <span id="fcAppVersion">Frecuencia Cero · V19</span>
+   <span id="fcAppVersion">Frecuencia Cero · V20</span>
    <button id="fcCheckUpdates" type="button">↻ Buscar actualizaciones</button>
   </div>
   <p id="fcUpdateStatus" class="fc-update-status" aria-live="polite">La versión instalada se conserva al actualizar.</p>
@@ -438,9 +446,10 @@ function seedCatalog(){
    if(existing.chordDraft==null)existing.chordDraft=!!d.chordDraft;
    if(d.loopChords)existing.loopChords=true;
    if(!existing.draftNote&&d.draftNote)existing.draftNote=d.draftNote;
-  }else{songs.push(JSON.parse(JSON.stringify(d)));added++}
+   if(existing.section!=='keyboard'&&existing.section!=='accordion')existing.section='accordion';
+  }else{var copy=JSON.parse(JSON.stringify(d));copy.section='accordion';songs.push(copy);added++;}
  });
- songs.forEach(function(s){if(s.durationSec==null)s.durationSec=estimateDurationSeconds(s.text);var n=norm(s.title);if(n==='el mono colorado'){s.mappingNote='';s.chordDraft=true;}if(n==='el texanito'){s.title='El Texanito';s.key='Sol';if(!/^##\s*Instrumental/i.test(String(s.text||'').trim()))s.text='## Instrumental · melodía completa (sin letra)\n[G] [D7] [G] [C] [G] [D7] [G] [C]';s.loopChords=true;s.mappingNote='Pieza instrumental: no lleva letra. La secuencia de acordes se repite hasta detener el avance automático.';}if(n==='la caritina secreto'){s.title='La Caritina (Secreto)';s.mappingNote='';}if(n==='ay ester'){s.title='Ay Ester';s.mappingNote='';}if(n==='tubo que tubo'){s.title='Tubo que tubo';s.mappingNote='';}});
+ songs.forEach(function(s){if(s.section!=='keyboard'&&s.section!=='accordion')s.section='accordion';if(s.durationSec==null)s.durationSec=estimateDurationSeconds(s.text);var n=norm(s.title);if(n==='el mono colorado'){s.mappingNote='';s.chordDraft=true;}if(n==='el texanito'){s.title='El Texanito';s.key='Sol';if(!/^##\s*Instrumental/i.test(String(s.text||'').trim()))s.text='## Instrumental · melodía completa (sin letra)\n[G] [D7] [G] [C] [G] [D7] [G] [C]';s.loopChords=true;s.mappingNote='Pieza instrumental: no lleva letra. La secuencia de acordes se repite hasta detener el avance automático.';}if(n==='la caritina secreto'){s.title='La Caritina (Secreto)';s.mappingNote='';}if(n==='ay ester'){s.title='Ay Ester';s.mappingNote='';}if(n==='tubo que tubo'){s.title='Tubo que tubo';s.mappingNote='';}});
  save();return added;
 }
 function saveEvents(){safeStore(EVENT_KEY,JSON.stringify(events))}
@@ -448,7 +457,48 @@ function show(id){['vl','vse','vset','vplaylist','vr','ve','vm'].forEach(functio
 function find(id){return songs.find(function(s){return s.id===id})}
 function findEvent(id){return events.find(function(e){return e.id===id})}
 function seedLegacyEvent(){events=events.filter(function(e){var n=norm(e.name||'');return e.id!=='evt_import_test'&&n!=='prueba de evento'&&n!=='evento importado'});if(!events.length){var starred=songs.filter(function(s){return s.star}).map(function(s){return s.id});if(starred.length)events.push({id:'evt_legacy',name:'Evento anterior',songIds:starred,updatedAt:Date.now()})}events=events.map(function(e){if(!Array.isArray(e.songIds))e.songIds=[];return e});saveEvents()}
-function render(){var q=norm($('q').value.trim()),l=$('list');l.innerHTML='';var rank={'Sol':0,'Fa':1,'Do':2,'Sib':3,'Re':4,'La':5,'Solm':6,'Sim':7,'Am':8};var a=songs.filter(function(s){return !q||norm(s.title).includes(q)||norm(s.text).includes(q)||norm(s.key).includes(q)});a.sort(function(x,y){var xr=rank[x.key]==null?99:rank[x.key],yr=rank[y.key]==null?99:rank[y.key];if(xr!==yr)return xr-yr;var xo=x.catalogOrder==null?99999:x.catalogOrder,yo=y.catalogOrder==null?99999:y.catalogOrder;if(xo!==yo)return xo-yo;return x.title.localeCompare(y.title,'es')});if(!a.length){l.innerHTML='<div class="empty">No hay resultados.</div>';return}var lastGroup=null;a.forEach(function(s){var group=s.key||'Sin tonalidad';if(group!==lastGroup){var h=document.createElement('div');h.className='list-group';h.textContent='TONO '+displayKeyName(group).toUpperCase();l.appendChild(h);lastGroup=group}var r=document.createElement('div');r.className='row';var t=document.createElement('button');t.className='t';var n=document.createElement('span');n.className='song-name';n.textContent=s.title;var k=document.createElement('span');k.className='song-key';k.textContent=s.text?(s.chordDraft?'Revisar acordes':'Lista'):'Pendiente';t.append(n,k);t.onclick=function(){openSong(s.id,'vl')};var b=document.createElement('button');b.className='s'+(s.star?' on':'');b.textContent=s.star?'★':'☆';b.setAttribute('aria-label','Marcar como favorita');b.onclick=function(){s.star=!s.star;save();render()};r.append(t,b);l.appendChild(r)})}
+function render(){
+ var q=norm($('q').value.trim()),l=$('list');l.innerHTML='';
+ var rank={'Sol':0,'Fa':1,'Do':2,'Sib':3,'Re':4,'La':5,'Solm':6,'Sim':7,'Am':8};
+ function sectionOf(song){return song&&song.section==='keyboard'?'keyboard':'accordion'}
+ function songMatches(song){
+  if(!q)return true;
+  var sectionName=sectionOf(song)==='keyboard'?'teclado':'acordeon';
+  return norm(song.title).includes(q)||norm(song.text).includes(q)||norm(song.key).includes(q)||sectionName.includes(q);
+ }
+ function sortSongs(list){return list.sort(function(x,y){
+  var xr=rank[x.key]==null?99:rank[x.key],yr=rank[y.key]==null?99:rank[y.key];
+  if(xr!==yr)return xr-yr;
+  var xo=x.catalogOrder==null?99999:x.catalogOrder,yo=y.catalogOrder==null?99999:y.catalogOrder;
+  if(xo!==yo)return xo-yo;
+  return x.title.localeCompare(y.title,'es');
+ });}
+ var matched=songs.filter(songMatches);
+ if(!matched.length){l.innerHTML='<div class="empty">No hay resultados para esta búsqueda.</div>';return;}
+ var sections=[{id:'accordion',title:'🪗 ACORDEÓN'},{id:'keyboard',title:'🎹 TECLADO'}];
+ sections.forEach(function(section){
+  var items=sortSongs(matched.filter(function(song){return sectionOf(song)===section.id;}));
+  if(q&&!items.length)return;
+  var head=document.createElement('div');head.className='catalog-section-heading';
+  var title=document.createElement('span');title.textContent=section.title;
+  var count=document.createElement('span');count.className='catalog-section-count';count.textContent=items.length+' canciones';
+  head.append(title,count);l.appendChild(head);
+  if(!items.length){var empty=document.createElement('div');empty.className='catalog-section-empty';empty.textContent='Todavía no hay canciones. Pulsa + y selecciona este bloque al agregarlas.';l.appendChild(empty);return;}
+  var lastTone=null;
+  items.forEach(function(song){
+   var tone=song.key||'Sin tonalidad';
+   if(tone!==lastTone){var toneHead=document.createElement('div');toneHead.className='list-group';toneHead.textContent='TONO '+displayKeyName(tone).toUpperCase();l.appendChild(toneHead);lastTone=tone;}
+   var row=document.createElement('div');row.className='row';
+   var open=document.createElement('button');open.className='t';
+   var name=document.createElement('span');name.className='song-name';name.textContent=song.title;
+   var state=document.createElement('span');state.className='song-key';state.textContent=song.text?(song.chordDraft?'Revisar acordes':'Lista'):'Pendiente';
+   open.append(name,state);open.onclick=function(){openSong(song.id,'vl');};
+   var favorite=document.createElement('button');favorite.className='s'+(song.star?' on':'');favorite.textContent=song.star?'★':'☆';favorite.setAttribute('aria-label','Marcar como favorita');
+   favorite.onclick=function(){song.star=!song.star;save();render();};
+   row.append(open,favorite);l.appendChild(row);
+  });
+ });
+}
 function renderEvents(){
  var l=$('eventList');l.innerHTML='';
  if(!events.length){
@@ -475,11 +525,11 @@ function renderEventPlaylist(){var ev=findEvent(currentEventId);if(!ev)return;$(
 function editEvent(id){var ev=id?findEvent(id):null;eventEditId=id||null;eventDraftSongIds=ev?(ev.songIds||[]).slice():[];$('eventEditorHeading').textContent=ev?'Editar evento':'Nuevo evento';$('eventName').value=ev?ev.name:'';$('eventSongSearch').value='';$('eventDelete').style.display=ev?'':'none';renderEventEditor();show('vset')}
 function renderEventEditor(){var chosen=$('eventSelected');chosen.innerHTML='';$('eventSelectedCount').textContent=eventDraftSongIds.length+' seleccionadas · aprox. '+formatDurationLong(eventDuration(eventDraftSongIds));if(!eventDraftSongIds.length){var msg=document.createElement('p');msg.className='note';msg.textContent='Aún no agregas canciones. Selecciónalas en el catálogo de abajo.';chosen.appendChild(msg)}eventDraftSongIds.forEach(function(id,i){var s=find(id);var row=document.createElement('div');row.className='event-selected-row';var pos=document.createElement('span');pos.className='event-position';pos.textContent=i+1;var title=document.createElement('span');title.className='event-selected-title';title.textContent=s?s.title:'Canción no disponible';var duration=document.createElement('small');duration.className='event-selected-time';duration.textContent=s?formatDuration(songDuration(s)):'--:--';var up=document.createElement('button');up.textContent='↑';up.title='Subir';up.disabled=i===0;up.onclick=function(){moveDraftSong(i,-1)};var down=document.createElement('button');down.textContent='↓';down.title='Bajar';down.disabled=i===eventDraftSongIds.length-1;down.onclick=function(){moveDraftSong(i,1)};var remove=document.createElement('button');remove.textContent='×';remove.title='Quitar del evento';remove.onclick=function(){eventDraftSongIds.splice(i,1);renderEventEditor()};row.append(pos,title,duration,up,down,remove);chosen.appendChild(row)});renderSongPicker()}
 function moveDraftSong(i,delta){var j=i+delta;if(j<0||j>=eventDraftSongIds.length)return;var t=eventDraftSongIds[i];eventDraftSongIds[i]=eventDraftSongIds[j];eventDraftSongIds[j]=t;renderEventEditor()}
-function renderSongPicker(){var l=$('eventSongPicker'),q=norm($('eventSongSearch').value);l.innerHTML='';var rank={'Sol':0,'Fa':1,'Do':2,'Sib':3,'Re':4,'La':5,'Solm':6,'Sim':7,'Am':8};var arr=songs.filter(function(s){return !q||norm(s.title).includes(q)||norm(s.key).includes(q)}).sort(function(a,b){var ar=rank[a.key]==null?99:rank[a.key],br=rank[b.key]==null?99:rank[b.key];if(ar!==br)return ar-br;return (a.catalogOrder||0)-(b.catalogOrder||0)});if(!arr.length){l.textContent='No se encontraron canciones.';return}var last='';arr.forEach(function(s){var group=s.key||'Sin tonalidad';if(group!==last){var h=document.createElement('div');h.className='event-picker-group';h.textContent='TONO '+displayKeyName(group).toUpperCase();l.appendChild(h);last=group}var label=document.createElement('label');label.className='event-picker-row';var check=document.createElement('input');check.type='checkbox';check.checked=eventDraftSongIds.indexOf(s.id)>=0;check.onchange=function(){var at=eventDraftSongIds.indexOf(s.id);if(check.checked&&at<0)eventDraftSongIds.push(s.id);else if(!check.checked&&at>=0)eventDraftSongIds.splice(at,1);renderEventEditor()};var title=document.createElement('span');title.textContent=s.title;var key=document.createElement('small');key.className='note';key.textContent=(s.key?displayKeyName(s.key):'Sin tono')+' · '+formatDuration(songDuration(s));label.append(check,title,key);l.appendChild(label)})}
+function renderSongPicker(){var l=$('eventSongPicker'),q=norm($('eventSongSearch').value);l.innerHTML='';var rank={'Sol':0,'Fa':1,'Do':2,'Sib':3,'Re':4,'La':5,'Solm':6,'Sim':7,'Am':8};var arr=songs.filter(function(s){return !q||norm(s.title).includes(q)||norm(s.key).includes(q)||norm(s.section==='keyboard'?'teclado':'acordeon').includes(q)}).sort(function(a,b){var as=a.section==='keyboard'?1:0,bs=b.section==='keyboard'?1:0;if(as!==bs)return as-bs;var ar=rank[a.key]==null?99:rank[a.key],br=rank[b.key]==null?99:rank[b.key];if(ar!==br)return ar-br;return (a.catalogOrder||0)-(b.catalogOrder||0)});if(!arr.length){l.textContent='No se encontraron canciones.';return}var lastSection='',lastTone='';arr.forEach(function(s){var section=s.section==='keyboard'?'keyboard':'accordion';if(section!==lastSection){var sh=document.createElement('div');sh.className='event-picker-group';sh.textContent=section==='keyboard'?'🎹 TECLADO':'🪗 ACORDEÓN';l.appendChild(sh);lastSection=section;lastTone=''}var group=s.key||'Sin tonalidad';if(group!==lastTone){var h=document.createElement('div');h.className='event-picker-group';h.style.paddingLeft='20px';h.textContent='TONO '+displayKeyName(group).toUpperCase();l.appendChild(h);lastTone=group}var label=document.createElement('label');label.className='event-picker-row';var check=document.createElement('input');check.type='checkbox';check.checked=eventDraftSongIds.indexOf(s.id)>=0;check.onchange=function(){var at=eventDraftSongIds.indexOf(s.id);if(check.checked&&at<0)eventDraftSongIds.push(s.id);else if(!check.checked&&at>=0)eventDraftSongIds.splice(at,1);renderEventEditor()};var title=document.createElement('span');title.textContent=s.title;var key=document.createElement('small');key.className='note';key.textContent=(s.key?displayKeyName(s.key):'Sin tono')+' · '+formatDuration(songDuration(s));label.append(check,title,key);l.appendChild(label)})}
 function saveEventEditor(){var name=$('eventName').value.trim();if(!name){alert('Escribe el nombre del evento.');$('eventName').focus();return}var ev=eventEditId?findEvent(eventEditId):null;if(!ev){ev={id:'evt_'+Date.now(),name:name,songIds:[],createdAt:Date.now()};events.push(ev)}ev.name=name;ev.songIds=eventDraftSongIds.slice();ev.updatedAt=Date.now();saveEvents();renderEvents();currentEventId=ev.id;openEvent(ev.id)}
 function deleteEvent(){if(!eventEditId)return;if(!confirm('¿Borrar esta carpeta de evento? Las canciones del catálogo no se borrarán.'))return;events=events.filter(function(e){return e.id!==eventEditId});saveEvents();currentEventId=null;renderEvents();show('vse')}
-function shareCurrentEvent(){var ev=findEvent(currentEventId);if(!ev)return;var payload={format:'frecuencia-cero-event-v1',id:ev.id,name:ev.name,songs:(ev.songIds||[]).map(function(id){var s=find(id);return s?{id:s.id,title:s.title,key:s.key||'',text:s.text||'',durationSec:songDuration(s),chordSeconds:s.chordSeconds||3,scrollSpeed:s.scrollSpeed||defaultSpeed,tr:s.tr||0,loopChords:!!s.loopChords,chordDraft:!!s.chordDraft,mappingNote:s.mappingNote||'',draftNote:s.draftNote||'',sourceTitle:s.sourceTitle||'',catalogOrder:s.catalogOrder}:{id:id,title:'Canción no encontrada',key:'',text:''}})};var code=JSON.stringify(payload);$('eventShareText').value=code;var msg=$('eventShareMsg');if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(code).then(function(){msg.textContent='Código copiado con las letras, acordes, duraciones y orden. Envíalo por WhatsApp al otro teléfono.'}).catch(function(){msg.textContent='Selecciona y copia el código completo para enviarlo por WhatsApp.'})}else{msg.textContent='Selecciona y copia el código completo para enviarlo por WhatsApp.'}$('eventShareText').style.display='block';$('eventShareText').focus();$('eventShareText').select()}
-function importSharedEvent(){var raw=$('eventImportText').value.trim();if(!raw){$('eventImportMsg').textContent='Pega primero el código del evento.';return}try{var data=JSON.parse(raw);if(data.format!=='frecuencia-cero-event-v1'||!Array.isArray(data.songs))throw new Error('Formato no reconocido');var ids=[];data.songs.forEach(function(item){var s=songs.find(function(x){return x.id===item.id})||songs.find(function(x){return norm(x.title)===norm(item.title)});if(!s){s={id:item.id||('shared_'+Date.now()+'_'+ids.length),title:item.title||'Canción importada',key:item.key||'',text:item.text||'',star:false,durationSec:item.durationSec||estimateDurationSeconds(item.text||''),chordSeconds:item.chordSeconds||3.0,scrollSpeed:item.scrollSpeed||defaultSpeed,tr:item.tr||0,loopChords:!!item.loopChords,chordDraft:!!item.chordDraft,mappingNote:item.mappingNote||'',draftNote:item.draftNote||'',sourceTitle:item.sourceTitle||'',catalogOrder:item.catalogOrder};songs.push(s)}else{['title','key','text','durationSec','chordSeconds','scrollSpeed','tr','loopChords','chordDraft','mappingNote','draftNote','sourceTitle','catalogOrder'].forEach(function(k){if(item[k]!==undefined)s[k]=item[k]})}if(s.durationSec==null)s.durationSec=estimateDurationSeconds(s.text);ids.push(s.id)});var ev=events.find(function(x){return x.id===data.id})||events.find(function(x){return norm(x.name)===norm(data.name)});if(!ev){ev={id:data.id||'evt_'+Date.now(),name:data.name||'Evento compartido',songIds:[],createdAt:Date.now()};events.push(ev)}ev.name=data.name||ev.name;ev.songIds=ids;ev.updatedAt=Date.now();save();saveEvents();render();renderEvents();$('eventImportText').value='';$('eventImportMsg').textContent='Carpeta "'+ev.name+'" importada con '+ids.length+' canciones, letras, acordes, duraciones y su orden.'}catch(err){$('eventImportMsg').textContent='No se pudo importar: revisa que hayas pegado el código completo.'}}
+function shareCurrentEvent(){var ev=findEvent(currentEventId);if(!ev)return;var payload={format:'frecuencia-cero-event-v1',id:ev.id,name:ev.name,songs:(ev.songIds||[]).map(function(id){var s=find(id);return s?{id:s.id,title:s.title,key:s.key||'',section:s.section==='keyboard'?'keyboard':'accordion',text:s.text||'',durationSec:songDuration(s),chordSeconds:s.chordSeconds||3,scrollSpeed:s.scrollSpeed||defaultSpeed,tr:s.tr||0,loopChords:!!s.loopChords,chordDraft:!!s.chordDraft,mappingNote:s.mappingNote||'',draftNote:s.draftNote||'',sourceTitle:s.sourceTitle||'',catalogOrder:s.catalogOrder}:{id:id,title:'Canción no encontrada',key:'',text:''}})};var code=JSON.stringify(payload);$('eventShareText').value=code;var msg=$('eventShareMsg');if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(code).then(function(){msg.textContent='Código copiado con las letras, acordes, duraciones y orden. Envíalo por WhatsApp al otro teléfono.'}).catch(function(){msg.textContent='Selecciona y copia el código completo para enviarlo por WhatsApp.'})}else{msg.textContent='Selecciona y copia el código completo para enviarlo por WhatsApp.'}$('eventShareText').style.display='block';$('eventShareText').focus();$('eventShareText').select()}
+function importSharedEvent(){var raw=$('eventImportText').value.trim();if(!raw){$('eventImportMsg').textContent='Pega primero el código del evento.';return}try{var data=JSON.parse(raw);if(data.format!=='frecuencia-cero-event-v1'||!Array.isArray(data.songs))throw new Error('Formato no reconocido');var ids=[];data.songs.forEach(function(item){var s=songs.find(function(x){return x.id===item.id})||songs.find(function(x){return norm(x.title)===norm(item.title)});if(!s){s={id:item.id||('shared_'+Date.now()+'_'+ids.length),title:item.title||'Canción importada',key:item.key||'',section:item.section==='keyboard'?'keyboard':'accordion',text:item.text||'',star:false,durationSec:item.durationSec||estimateDurationSeconds(item.text||''),chordSeconds:item.chordSeconds||3.0,scrollSpeed:item.scrollSpeed||defaultSpeed,tr:item.tr||0,loopChords:!!item.loopChords,chordDraft:!!item.chordDraft,mappingNote:item.mappingNote||'',draftNote:item.draftNote||'',sourceTitle:item.sourceTitle||'',catalogOrder:item.catalogOrder};songs.push(s)}else{['title','key','section','text','durationSec','chordSeconds','scrollSpeed','tr','loopChords','chordDraft','mappingNote','draftNote','sourceTitle','catalogOrder'].forEach(function(k){if(item[k]!==undefined)s[k]=item[k]})}if(s.durationSec==null)s.durationSec=estimateDurationSeconds(s.text);ids.push(s.id)});var ev=events.find(function(x){return x.id===data.id})||events.find(function(x){return norm(x.name)===norm(data.name)});if(!ev){ev={id:data.id||'evt_'+Date.now(),name:data.name||'Evento compartido',songIds:[],createdAt:Date.now()};events.push(ev)}ev.name=data.name||ev.name;ev.songIds=ids;ev.updatedAt=Date.now();save();saveEvents();render();renderEvents();$('eventImportText').value='';$('eventImportMsg').textContent='Carpeta "'+ev.name+'" importada con '+ids.length+' canciones, letras, acordes, duraciones y su orden.'}catch(err){$('eventImportMsg').textContent='No se pudo importar: revisa que hayas pegado el código completo.'}}
 function transposeRoot(root,k){var i=SH.indexOf(root);if(i<0)i=FL.indexOf(root);if(i<0)return root;var preferFlat=root.indexOf('b')>-1;var j=((i+k)%12+12)%12;return(preferFlat?FL:SH)[j]}
 function tpose(c){var k=cur&&cur.tr||0;if(!k||/^N\.?C/i.test(c))return c;var m=/^([A-G][#b]?)(.*)$/.exec(c);if(!m)return c;var root=transposeRoot(m[1],k),tail=m[2],sm=/^(.*)\/([A-G][#b]?)$/.exec(tail);if(sm)tail=sm[1]+'/'+transposeRoot(sm[2],k);return root+tail}
 function chordLabel(c){var x=tpose(c);if(bassNotation!=='es'||/^N\.?C/i.test(x))return x;var m=/^([A-G][#b]?)(.*)$/.exec(x);if(!m)return x;var tail=m[2],sm=/^(.*)\/([A-G][#b]?)$/.exec(tail);if(sm)tail=sm[1]+'/'+(NOTE_ES[sm[2]]||sm[2]);return(NOTE_ES[m[1]]||m[1])+tail}
@@ -522,7 +572,7 @@ function updatePalette(){
  if(data){note.textContent='EN: '+data.en+'\nES: '+data.es;}else{note.textContent='Selecciona una tonalidad para ver los acordes diatónicos sugeridos.';}
  note.style.whiteSpace='pre-line'; box.appendChild(note);
 }
-function edit(id){stopAll();editId=id;var s=id?find(id):null;$('editorHeading').textContent=s?'Editar canción':'Agregar canción';$('et').value=s?s.title:'';$('el').value=s?s.text||'':'';$('ekey').value=s?s.key||'':'';$('eduration').value=formatDuration(s?s.durationSec:estimateDurationSeconds(s?s.text:''));$('eprocessMsg').textContent='';$('edel').style.display=s?'':'none';updatePalette();show('ve')}
+function edit(id){stopAll();editId=id;var s=id?find(id):null;$('editorHeading').textContent=s?'Editar canción':'Agregar canción';$('et').value=s?s.title:'';$('el').value=s?s.text||'':'';$('ekey').value=s?s.key||'':'';$('esection').value=s&&s.section==='keyboard'?'keyboard':'accordion';$('eduration').value=formatDuration(s?s.durationSec:estimateDurationSeconds(s?s.text:''));$('eprocessMsg').textContent='';$('edel').style.display=s?'':'none';updatePalette();show('ve')}
 function displayKeyName(key){var names={Sim:'Si menor (Bm)',Am:'La menor (Am)'};return names[key]||key||'Sin tonalidad'}
 function normalizeKeyValue(value){
  var v=norm(String(value||'')).trim().replace(/^tono\s*(?:de\s*)?/,'').replace(/^tonalidad\s*(?:de\s*)?/,'').replace(/\b(mayor|major)\b/g,'').replace(/\s+/g,' ').trim();
@@ -586,16 +636,32 @@ function importText(raw){
  parts.forEach(function(part){var parsed=parseSongPaste(part,'','',''),title=parsed.title;
   if(!title){var first=part.split(/\r?\n/).find(function(x){return x.trim()&&!/^##/.test(x)&&!chordTokensFromLine(x).length});title=(first||'').replace(/^#\s*/,'').trim();if(!title)return;}
   var dur=parseDuration(parsed.duration),existing=songs.find(function(x){return norm(x.title)===norm(title)});
-  if(existing){existing.text=parsed.text;if(parsed.key)existing.key=parsed.key;if(dur!==null)existing.durationSec=dur;existing.chordDraft=false;n++;}
-  else{songs.push({id:'s'+Date.now()+'_'+n,title:title,text:parsed.text,key:parsed.key||'',star:false,durationSec:dur!==null?dur:estimateDurationSeconds(parsed.text),chordSeconds:3.0,scrollSpeed:defaultSpeed,chordDraft:false});n++;}
+  if(existing){existing.text=parsed.text;if(parsed.key)existing.key=parsed.key;existing.section=$('esection')&&$('esection').value==='keyboard'?'keyboard':(existing.section==='keyboard'?'keyboard':'accordion');if(dur!==null)existing.durationSec=dur;existing.chordDraft=false;n++;}
+  else{songs.push({id:'s'+Date.now()+'_'+n,title:title,text:parsed.text,key:parsed.key||'',section:$('esection')&&$('esection').value==='keyboard'?'keyboard':'accordion',star:false,durationSec:dur!==null?dur:estimateDurationSeconds(parsed.text),chordSeconds:3.0,scrollSpeed:defaultSpeed,chordDraft:false});n++;}
   convertedTotal+=parsed.converted;
  });save();render();return {count:n,converted:convertedTotal};
 }
-function importBackupOrText(raw){try{var data=JSON.parse(raw);if(data&&data.format==='letras-repertorio-v2'&&Array.isArray(data.songs)){songs=data.songs.filter(function(s){return s&&s.title}).map(function(s,i){if(!s.id)s.id='restored_'+i;if(s.text==null)s.text='';if(s.durationSec==null)s.durationSec=estimateDurationSeconds(s.text);if(s.chordSeconds==null)s.chordSeconds=3.0;if(s.scrollSpeed==null)s.scrollSpeed=defaultSpeed;return s});if(Array.isArray(data.events))events=data.events;seedCatalog();seedLegacyEvent();saveEvents();save();render();renderEvents();return {count:songs.length,backup:true}}}catch(e){}return {count:importText(raw),backup:false}}
+function importBackupOrText(raw){try{var data=JSON.parse(raw);if(data&&data.format==='letras-repertorio-v2'&&Array.isArray(data.songs)){songs=data.songs.filter(function(s){return s&&s.title}).map(function(s,i){if(!s.id)s.id='restored_'+i;if(s.text==null)s.text='';if(s.section!=='keyboard'&&s.section!=='accordion')s.section='accordion';if(s.durationSec==null)s.durationSec=estimateDurationSeconds(s.text);if(s.chordSeconds==null)s.chordSeconds=3.0;if(s.scrollSpeed==null)s.scrollSpeed=defaultSpeed;return s});if(Array.isArray(data.events))events=data.events;seedCatalog();seedLegacyEvent();saveEvents();save();render();renderEvents();return {count:songs.length,backup:true}}}catch(e){}return {count:importText(raw),backup:false}}
 $('q').oninput=render;$('tall').onclick=function(){filt='all';$('tall').classList.add('on');$('tall').setAttribute('aria-pressed','true');$('tset').classList.remove('on');render()};$('tset').onclick=function(){renderEvents();show('vse')};
 $('tmode').onclick=function(){mode=mode==='s'?'b':'s';safeStore('letras_mode',mode);syncModeButton();if($('vr').classList.contains('on')){stopAll();bassIndex=0;paint();$('rd').scrollTop=0}};
 $('bnew').onclick=function(){edit(null)};$('bedit').onclick=function(){edit(cur&&cur.id)};$('bback').onclick=function(){stopAll();show(songReturnView==='vplaylist'?'vplaylist':'vl');if(songReturnView==='vplaylist')renderEventPlaylist()};$('ecancel').onclick=function(){show(editId?'vr':'vl')};
-$('esave').onclick=function(){var title=$('et').value.trim(),text=$('el').value.replace(/\s+$/,'');if(!title){alert('Escribe el título de la canción.');return}var duration=parseDuration($('eduration').value);if(duration===null||duration<30){alert('Escribe la duración como mm:ss, por ejemplo 03:20.');$('eduration').focus();return}var key=$('ekey').value;if(editId){var s=find(editId);s.title=title;s.text=text;s.key=key;s.chordDraft=false;s.durationSec=duration;s.chordSeconds=Number(s.chordSeconds||3.0);s.scrollSpeed=Number(s.scrollSpeed||defaultSpeed);cur=s;save();render();openSong(editId)}else{var existing=songs.find(function(x){return norm(x.title)===norm(title)});if(existing){existing.text=text;existing.key=key;existing.durationSec=duration;save();render();openSong(existing.id)}else{var id='s'+Date.now();songs.push({id:id,title:title,text:text,star:false,key:key,chordDraft:false,durationSec:duration,chordSeconds:3.0,scrollSpeed:defaultSpeed});save();render();openSong(id)}}};
+$('esave').onclick=function(){
+ var title=$('et').value.trim(),text=$('el').value.replace(/\s+$/,'');
+ if(!title){alert('Escribe el título de la canción.');return;}
+ var duration=parseDuration($('eduration').value);
+ if(duration===null||duration<30){alert('Escribe la duración como mm:ss, por ejemplo 03:20.');$('eduration').focus();return;}
+ var key=$('ekey').value,section=$('esection').value==='keyboard'?'keyboard':'accordion';
+ if(editId){
+  var song=find(editId);if(!song)return;
+  song.title=title;song.text=text;song.key=key;song.section=section;song.chordDraft=false;song.durationSec=duration;
+  song.chordSeconds=Number(song.chordSeconds||3.0);song.scrollSpeed=Number(song.scrollSpeed||defaultSpeed);cur=song;
+  save();render();openSong(editId);
+ }else{
+  var existing=songs.find(function(x){return norm(x.title)===norm(title);});
+  if(existing){existing.text=text;existing.key=key;existing.section=section;existing.durationSec=duration;save();render();openSong(existing.id);}
+  else{var id='s'+Date.now();songs.push({id:id,title:title,text:text,star:false,key:key,section:section,chordDraft:false,durationSec:duration,chordSeconds:3.0,scrollSpeed:defaultSpeed});save();render();openSong(id);}
+ }
+};
 $('edel').onclick=function(){if(!editId)return;if(confirm('¿Borrar esta canción?')){songs=songs.filter(function(s){return s.id!==editId});save();render();show('vl')}};
 $('ekey').onchange=updatePalette;$('eprocessChords').onclick=processChordImport;$('bmenu').onclick=function(){$('mmsg').textContent='';show('vm')};$('mback').onclick=function(){show('vl')};
 $('mexp').onclick=function(){var data={format:'letras-repertorio-v2',songs:songs,events:events};var text=JSON.stringify(data,null,2);var field=$('mi');field.value=text;if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(text).then(function(){field.hidden=true;$('mmsg').textContent='Respaldo copiado. Guárdalo en Notas o Drive.'}).catch(function(){field.hidden=false;$('mmsg').textContent='No se pudo copiar automáticamente. El respaldo quedó visible abajo para que puedas copiarlo.'})}else{field.hidden=false;$('mmsg').textContent='El respaldo quedó visible abajo. Mantén pulsado el texto para copiarlo.'}};
@@ -631,7 +697,7 @@ syncModeButton();setNotation();render();
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function () {
-    navigator.serviceWorker.register('./sw.js?v=18').catch(function (err) {
+    navigator.serviceWorker.register('./sw.js?v=20').catch(function (err) {
       console.warn('No se pudo registrar el modo sin conexión:', err);
     });
   });
