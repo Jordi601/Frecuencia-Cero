@@ -1,12 +1,13 @@
-FRECUENCIA CERO V15 - MENÚ LIMPIO Y QR EN DOS ACCIONES
+FRECUENCIA CERO V16 - ACTUALIZACIÓN
 
-1. Descomprime este ZIP y sube TODO el contenido de la carpeta a la raíz del repositorio GitHub Pages, reemplazando los archivos existentes.
-2. En el iPhone propietario, entra a Más → Mi banda y sincronización.
-3. Si todavía no existe la banda, pulsa «Crear banda». Este botón SOLO crea o recupera de forma segura la banda; no genera un QR.
-4. Cuando el iPhone aparezca conectado, pulsa el segundo botón «Generar código QR para vincular otro dispositivo».
-5. En el otro teléfono, selecciona el perfil que corresponda o pulsa «Escanear código QR» y lee el código del iPhone autorizado.
-6. En Más se conserva la administración de solicitudes, integrantes, funciones y dispositivos. Se retiró el importador masivo de canciones de ese menú; las canciones nuevas se agregan desde el botón + del catálogo.
-7. En la parte inferior de Más aparece Frecuencia Cero · V15 y «Buscar actualizaciones». Ese botón consulta el Service Worker y, si encuentra una versión nueva, la activa y recarga la aplicación. No borra la identidad de Firebase ni las canciones/eventos locales.
-8. Si GitHub ya está actualizado y el teléfono conserva una versión anterior, abre Más → Buscar actualizaciones.
-9. No elimines el acceso de inicio, no cierres sesión de Firebase y no borres datos de Safari para actualizar.
-10. UID de propietario configurado: qZCvhHTK3MUhcABIlZlRyrqHKdC2.
+1. Sube TODO el contenido de esta carpeta a la raíz de GitHub Pages y reemplaza los archivos anteriores.
+2. Conserva la misma base Firebase y las reglas publicadas; no hay que volver a crear la banda ni cambiar el UID propietario.
+3. En iPhone, abre Más → Buscar actualizaciones después de publicar V16. No borres el icono, datos de Safari ni la identidad de Firebase.
+4. En el editor de cada evento, cada canción tiene el selector «Bloque del repertorio»: Acordeón o Teclado. El orden de la lista se conserva como secuencia de Voz 1.
+5. En el repertorio del evento puedes filtrar Todas, Acordeón o Teclado. El tono y la duración aparecen en cada canción. Filtrar no modifica el orden de ejecución.
+6. Comportamiento automático: Acordeonista en bloque Acordeón = letra sincronizada; Acordeonista en bloque Teclado = guitarra con acordes + letra. Tecladista en bloque Acordeón = guitarra con acordes + letra; Tecladista en bloque Teclado = letra sincronizada. Bajista conserva acordes + letra; voces siguen la letra.
+7. Dentro de la canción, el selector «Mi instrumento en esta canción» permite cambiar temporalmente a Guitarra/Acordeón/Teclado si se necesita una excepción. «Automático por canción» restaura la regla del bloque.
+8. El mini reproductor aparece cuando hay una canción en vivo. Si navegas a catálogo u otro evento, conserva el título, renglón y progreso de la canción compartida. Pulsa «Volver a sincronía» para regresar a la misma posición.
+9. Para agregar canciones mientras Voz 1 continúa: el propietario abre el catálogo, agrega canciones; después entra al evento activo, pulsa Editar y añade las canciones al final. No elimines ni reordenes la canción que esté sonando. Guarda el evento y vuelve al mini reproductor.
+10. La presencia se actualiza al reconectar Firebase. Si un teléfono está suspendido, sin Internet o con la app cerrada, puede aparecer Desconectado hasta que vuelva a estar activo y reconecte.
+11. UID propietario configurado: qZCvhHTK3MUhcABIlZlRyrqHKdC2.

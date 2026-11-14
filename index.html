@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#f3f5f7">
-<meta name="fc-build" content="live-sync-v15-separated-qr-update-menu">
+<meta name="fc-build" content="live-sync-v16-keyboard-blocks-presence-mobile-fix">
 <title>Frecuencia Cero – Letras y acordes</title>
 <meta name="application-name" content="Frecuencia Cero">
 <meta name="apple-mobile-web-app-title" content="Frecuencia Cero">
@@ -30,7 +30,7 @@ input,textarea,select{width:100%;background:var(--card);border:1px solid var(--l
 #rt{white-space:pre-wrap;line-height:1.5;font-weight:600;max-width:42em;margin:0 auto;overflow-wrap:anywhere}
 .lyric-line{min-height:1.5em;margin:0 0 .35em;white-space:pre-wrap}.sec{color:var(--acc);font-weight:800;margin:1.1em 0 .4em;font-size:.72em;letter-spacing:.07em;text-transform:uppercase}
 .bass-line{margin:0 0 .55em;line-height:1.5}.chord-part{display:inline-grid;grid-template-rows:auto auto;vertical-align:bottom;align-items:end;margin-right:.12em;white-space:pre-wrap}.chord-tag{display:block;min-height:1.12em;font-size:.64em;line-height:1.12;font-weight:950;letter-spacing:.015em;color:var(--acc);padding:0 .08em}.chord-text{display:block;white-space:pre-wrap;color:var(--lyric);opacity:.72;font-weight:600}.chord-part.active .chord-tag{color:#2367e8;text-shadow:0 0 10px rgba(35,103,232,.18)}:root[data-theme="dark"] .chord-part.active .chord-tag{color:#9acaff}
-.bass-plain-line{color:var(--lyric);opacity:.68;margin:0 0 .55em}.line-current{background:color-mix(in srgb,var(--acc) 7%,transparent);border-radius:7px}
+.bass-plain-line{color:var(--lyric);opacity:.86;margin:0 0 .55em}.line-current{background:color-mix(in srgb,var(--acc) 7%,transparent);border-radius:7px}
 .bar{display:flex;gap:6px;padding:8px 10px;border-top:1px solid var(--line);align-items:center;flex-wrap:wrap;background:var(--bg)}.bar button{padding:7px 10px;min-height:40px;flex:0 0 auto}.bar .grow{flex:1}.small-label{font-size:11px;color:var(--mut);font-weight:800;white-space:nowrap}.speed-range{width:105px;min-height:28px;padding:0;accent-color:var(--acc);background:transparent;border:0}
 #speedval,#chordtime{font-size:12px;color:var(--mut);font-weight:800;min-width:52px;text-align:center;font-variant-numeric:tabular-nums}
 .bass-tools{display:none}.bass-tools.on{display:flex}.singer-tools{display:flex;gap:6px;align-items:center}.singer-tools.off{display:none}
@@ -315,7 +315,7 @@ body{
   <label for="eventName">Nombre del evento</label>
   <input id="eventName" placeholder="Ej. Boda 15 de noviembre">
   <div class="event-selected-head"><strong>Canciones del evento</strong><span id="eventSelectedCount" class="note">0 seleccionadas</span></div>
-  <p class="note">Usa las flechas para cambiar el orden. Ese será el orden que verá el cantante y el bajista. El total aproximado se actualiza al agregar o quitar canciones.</p>
+  <p class="note">Usa las flechas para cambiar el orden. Asigna cada canción al bloque Acordeón o Teclado; el orden general seguirá siendo el mismo para Voz 1 y todos los integrantes.</p>
   <div id="eventSelected" class="event-selected"></div>
   <div class="event-picker-head"><strong>Agregar desde el catálogo</strong><input id="eventSongSearch" type="search" placeholder="Buscar canción…"></div>
   <div id="eventSongPicker" class="event-picker"></div>
@@ -378,7 +378,7 @@ body{
   </div>
   <p id="mmsg" class="note" aria-live="polite"></p>
   <div class="fc-app-meta">
-   <span id="fcAppVersion">Frecuencia Cero · V15</span>
+   <span id="fcAppVersion">Frecuencia Cero · V16</span>
    <button id="fcCheckUpdates" type="button">↻ Buscar actualizaciones</button>
   </div>
   <p id="fcUpdateStatus" class="fc-update-status" aria-live="polite">La versión instalada se conserva al actualizar.</p>

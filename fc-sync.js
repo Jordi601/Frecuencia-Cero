@@ -4,7 +4,7 @@
 (function () {
   'use strict';
 
-  var APP_VERSION = 'V15';
+  var APP_VERSION = 'V16';
   var CFG_KEY = 'fc_firebase_config_v1';
   var BAND_KEY = 'fc_band_id_v1';
   var PROFILE_KEY = 'fc_device_profile_v1';
@@ -22,7 +22,7 @@
     measurementId: 'G-STPBJMMPKZ'
   };
   var FOLLOW_KEY = 'fc_follow_director_v1';
-  var OVERRIDE_KEY = 'fc_instrument_overrides_v1';
+  var OVERRIDE_KEY = 'fc_instrument_overrides_v2';
   var ROLE_LABELS = {
     voice1: 'Voz 1 · Director',
     voice2: 'Voz 2',
@@ -463,8 +463,25 @@
       renderLiveBanner(); handleLiveUpdate();
     });
     refs.live.on('value', function (snap) { liveState = snap.val() || null; renderLiveBanner(); handleLiveUpdate(); });
-    refs.presence.set({ name: roleName(memberRole), role: memberRole, online: true, since: firebase.database.ServerValue.TIMESTAMP }).catch(function () {});
-    refs.presence.onDisconnect().remove().catch(function () {});
+    // La presencia debe registrarse en cada reconexión, no solo al abrir la app.
+    // Si iOS suspende Safari/PWA o cambia la red, onDisconnect elimina el nodo;
+    // .info/connected vuelve a crearlo cuando Firebase recupera la conexión.
+    refs.connectionInfo = db.ref('.info/connected');
+    refs.connectionInfo.on('value', function (snap) {
+      if (snap.val() !== true || !isConnected()) return;
+      var presenceRef = refs.presence;
+      presenceRef.onDisconnect().remove().then(function () {
+        return presenceRef.set({
+          name: roleName(memberRole),
+          role: memberRole,
+          online: true,
+          since: firebase.database.ServerValue.TIMESTAMP,
+          lastSeen: firebase.database.ServerValue.TIMESTAMP
+        });
+      }).catch(function (err) {
+        setStatus('La banda está conectada, pero no se pudo actualizar la presencia: ' + (err.message || err), 'warning');
+      });
+    });
     updateSyncButtons();
   }
   function randomTokenHex() {
@@ -747,7 +764,7 @@
     var primary = document.createElement('div'); primary.className = 'fc-member-row';
     var primaryInfo = document.createElement('div'); primaryInfo.className = 'fc-member-info';
     var primaryName = document.createElement('strong'); primaryName.textContent = 'Dispositivo principal actual';
-    var primaryDetail = document.createElement('small'); primaryDetail.textContent = 'Este perfil está abierto en este dispositivo.';
+    var primaryDetail = document.createElement('small'); primaryDetail.textContent = 'Este perfil está abierto aquí · ' + (presenceMap[currentUser.uid] && presenceMap[currentUser.uid].online ? 'En línea' : 'Sin conexión reciente');
     primaryInfo.append(primaryName, primaryDetail); primary.appendChild(primaryInfo); box.appendChild(primary);
     if (!own.length) { var empty = document.createElement('p'); empty.className = 'note'; empty.textContent = 'Todavía no has vinculado otros teléfonos o tablets.'; box.appendChild(empty); return; }
     own.forEach(function (deviceUid) {
@@ -769,11 +786,13 @@
     if (!ids.length) { box.textContent = 'No hay solicitudes pendientes.'; return; }
     ids.forEach(function (uid) {
       var req = joinRequestList[uid] || {};
-      var row = document.createElement('div'); row.className = 'fc-member-row';
-      var info = document.createElement('div'); info.className = 'fc-member-info';
-      var name = document.createElement('strong'); name.textContent = req.deviceName || 'Nuevo integrante';
-      var detail = document.createElement('small'); detail.textContent = 'Solicita: ' + roleName(req.requestedRole) + ' · ' + uid.slice(0, 9) + '…';
-      info.append(name, detail);
+      var row = document.createElement('div'); row.className = 'fc-member-row fc-request-row';
+      var info = document.createElement('div'); info.className = 'fc-member-info fc-request-info';
+      var name = document.createElement('strong'); name.textContent = req.deviceName || ('Solicitud · ' + roleName(req.requestedRole));
+      var detail = document.createElement('small'); detail.textContent = 'Solicita la función: ' + roleName(req.requestedRole);
+      var uidLine = document.createElement('small'); uidLine.textContent = 'ID: ' + uid.slice(0, 9) + '…'; uidLine.className = 'fc-request-uid';
+      info.append(name, detail, uidLine);
+      var actions = document.createElement('div'); actions.className = 'fc-request-actions';
       var select = document.createElement('select'); select.setAttribute('aria-label','Función para aprobar integrante');
       ROLE_OPTIONS.forEach(function (r) {
         if (r[0] === 'accordionist' || r[0] === 'pending') return;
@@ -784,8 +803,9 @@
         select.appendChild(opt);
       });
       var approve = document.createElement('button'); approve.className = 'p'; approve.textContent = 'Aprobar'; approve.onclick = function () { approveJoinRequest(uid, select.value); };
-      var reject = document.createElement('button'); reject.textContent = '×'; reject.title = 'Rechazar'; reject.onclick = function () { rejectJoinRequest(uid); };
-      row.append(info, select, approve, reject); box.appendChild(row);
+      var reject = document.createElement('button'); reject.className = 'fc-request-reject'; reject.textContent = 'Rechazar'; reject.title = 'Rechazar solicitud'; reject.onclick = function () { rejectJoinRequest(uid); };
+      actions.append(select, approve, reject);
+      row.append(info, actions); box.appendChild(row);
     });
   }
   function renderMemberAdmin() {
@@ -794,11 +814,11 @@
     var ids = Object.keys(memberList || {});
     if (!ids.length) { box.textContent = 'Los integrantes aparecerán aquí al unirse a la banda.'; return; }
     ids.forEach(function (uid) {
-      var m = memberList[uid] || {}, row = document.createElement('div'); row.className = 'fc-member-row';
+      var m = memberList[uid] || {}, row = document.createElement('div'); row.className = 'fc-member-row fc-admin-member-row';
       var info = document.createElement('div'); info.className = 'fc-member-info';
       var name = document.createElement('strong'); name.textContent = m.name || m.email || 'Integrante';
       var linkedCount = Object.keys(deviceList || {}).filter(function (deviceUid) { return deviceList[deviceUid] && deviceList[deviceUid].memberUid === uid; }).length;
-      var detail = document.createElement('small'); detail.textContent = (m.email || '') + (uid === currentUser.uid ? ' · Este dispositivo principal' : '') + (linkedCount ? ' · ' + linkedCount + ' dispositivo(s) vinculado(s)' : '') + (m.online ? ' · En línea' : ' · Desconectado');
+      var detail = document.createElement('small'); detail.textContent = (uid === currentUser.uid ? 'Perfil abierto en este dispositivo · ' : '') + (linkedCount ? linkedCount + ' dispositivo(s) vinculado(s) · ' : '') + (m.online ? 'En línea' : 'Desconectado');
       info.append(name, detail);
       var select = document.createElement('select'); select.setAttribute('aria-label', 'Rol de ' + (m.name || 'integrante'));
       ROLE_OPTIONS.forEach(function (r) { if (r[0] === 'accordionist' && bandMeta && uid !== bandMeta.ownerUid) return; var o = document.createElement('option'); o.value = r[0]; o.textContent = r[1]; if (r[0] !== 'pending' && r[0] !== m.role) { var used = Object.keys(memberList || {}).some(function (otherUid) { return otherUid !== uid && memberList[otherUid] && memberList[otherUid].role === r[0]; }); if (used) o.disabled = true; } select.appendChild(o); });
@@ -815,13 +835,25 @@
       });
     });
   }
-  function eventAssignmentDefaults() { return { accordionist: 'accordion', keyboardist: 'keyboard' }; }
+  function eventAssignmentDefaults() { return { section: 'accordion' }; }
   function getCurrentEvent() { return (window.events || []).find(function (ev) { return ev.id === window.currentEventId; }) || null; }
+  function getSongSection(songId, eventOverride) {
+    var ev = eventOverride || getCurrentEvent();
+    var assignment = ev && ev.assignments && ev.assignments[songId] || {};
+    if (assignment.section === 'keyboard' || assignment.section === 'accordion') return assignment.section;
+    // Compatibilidad con eventos V15 que ya tenían asignaciones independientes por perfil.
+    if (assignment.accordionist === 'guitar' && assignment.keyboardist === 'keyboard') return 'keyboard';
+    return 'accordion';
+  }
   function getAssignment(songId, roleKey) {
     var ev = getCurrentEvent();
-    var assigned = ev && ev.assignments && ev.assignments[songId] && ev.assignments[songId][roleKey];
-    if (assigned) return assigned;
-    return roleKey === 'accordionist' ? 'accordion' : 'keyboard';
+    var assignment = ev && ev.assignments && ev.assignments[songId] || {};
+    if (!assignment.section && assignment[roleKey]) return assignment[roleKey];
+    var section = getSongSection(songId, ev);
+    // Reglas automáticas acordadas: acordeonista en bloque teclado = guitarra;
+    // tecladista en bloque acordeón = guitarra. En su propio bloque siguen la letra.
+    if (roleKey === 'accordionist') return section === 'keyboard' ? 'guitar' : 'accordion';
+    return section === 'accordion' ? 'guitar' : 'keyboard';
   }
   function effectiveInstrument(songId) {
     var roleKey = memberRole;
@@ -846,12 +878,16 @@
     var desiredMode = 's';
     if (role === 'bass') desiredMode = 'b';
     else if (role === 'accordionist' || role === 'keyboardist') {
-      if (instrument === 'guitar') desiredMode = 'b';
-      else { desiredMode = 's'; nextOnly = true; }
-    } else if (role === 'drummer') { desiredMode = 's'; nextOnly = true; }
-    else if (role === 'voice1' || role === 'voice2') desiredMode = 's';
-    if (role === 'local' || role === 'unjoined' || role === 'pending') nextOnly = false;
+      // En bloque propio se muestra letra sincronizada; en bloque cruzado, acordes + letra.
+      desiredMode = instrument === 'guitar' ? 'b' : 's';
+    } else if (role === 'drummer' || role === 'voice1' || role === 'voice2') desiredMode = 's';
     if (window.mode !== desiredMode) { window.mode = desiredMode; window.paint(); }
+    if (role === 'accordionist' || role === 'keyboardist') {
+      var blockName = getSongSection(window.cur.id) === 'keyboard' ? 'Teclado' : 'Acordeón';
+      setText('rmeta', desiredMode === 'b'
+        ? 'Letra + acordes · Guitarra · Bloque ' + blockName
+        : 'Seguimiento de letra · Bloque ' + blockName);
+    }
     var rd = $('rd'), nextPanel = $('fcNextOnlyPanel');
     if (nextPanel) {
       if (nextOnly) {
@@ -859,7 +895,7 @@
         setText('fcRoleCurrentSong', window.cur.title);
         setText('fcRoleNextSong', next ? next.title : 'Aún no hay siguiente canción en este evento');
         setText('fcRoleCurrentKey', window.cur.key ? 'Tono: ' + window.cur.key : 'Tonalidad no especificada');
-        setText('fcRoleInstrumentName', role === 'accordionist' ? 'Acordeón' : role === 'keyboardist' ? 'Teclado' : 'Batería');
+        setText('fcRoleInstrumentName', role === 'accordionist' ? (instrument === 'guitar' ? 'Bloque Teclado · Guitarra' : 'Bloque Acordeón · Seguimiento') : role === 'keyboardist' ? (instrument === 'guitar' ? 'Bloque Acordeón · Acordes' : 'Bloque Teclado · Seguimiento') : 'Batería');
         nextPanel.style.display = '';
         if (rd) rd.style.display = 'none';
         if ($('mainbar')) $('mainbar').style.display = 'none';
@@ -1111,7 +1147,13 @@
     window.eventEditId = id || null;
     window.eventDraftSongIds = ev ? (ev.songIds || []).slice() : [];
     eventDraftAssignments = ev && ev.assignments ? JSON.parse(JSON.stringify(ev.assignments)) : {};
-    window.eventDraftSongIds.forEach(function (songId) { if (!eventDraftAssignments[songId]) eventDraftAssignments[songId] = eventAssignmentDefaults(); });
+    window.eventDraftSongIds.forEach(function (songId) {
+      if (!eventDraftAssignments[songId]) eventDraftAssignments[songId] = eventAssignmentDefaults();
+      var assignment = eventDraftAssignments[songId];
+      if (assignment.section !== 'accordion' && assignment.section !== 'keyboard') {
+        assignment.section = (assignment.accordionist === 'guitar' && assignment.keyboardist === 'keyboard') ? 'keyboard' : 'accordion';
+      }
+    });
     $('eventEditorHeading').textContent = ev ? 'Editar evento' : 'Nuevo evento';
     $('eventName').value = ev ? ev.name : '';
     $('eventSongSearch').value = '';
@@ -1133,15 +1175,25 @@
       var down = document.createElement('button'); down.textContent = '↓'; down.title = 'Bajar'; down.disabled = i === window.eventDraftSongIds.length - 1; down.onclick = function () { window.moveDraftSong(i, 1); };
       var remove = document.createElement('button'); remove.textContent = '×'; remove.title = 'Quitar del evento'; remove.onclick = function () { window.eventDraftSongIds.splice(i, 1); renderEventEditor(); };
       head.append(pos, title, duration, up, down, remove); row.appendChild(head);
-      var controls = document.createElement('div'); controls.className = 'fc-assignment-controls';
-      var accLabel = document.createElement('label'); accLabel.textContent = 'Acordeonista';
-      var acc = document.createElement('select'); [['accordion','Acordeón'],['guitar','Guitarra']].forEach(function (item) { var o = document.createElement('option'); o.value = item[0]; o.textContent = item[1]; acc.appendChild(o); });
-      var keyLabel = document.createElement('label'); keyLabel.textContent = 'Tecladista';
-      var key = document.createElement('select'); [['keyboard','Teclado'],['guitar','Guitarra']].forEach(function (item) { var o = document.createElement('option'); o.value = item[0]; o.textContent = item[1]; key.appendChild(o); });
-      var existing = eventDraftAssignments[id] || eventAssignmentDefaults(); acc.value = existing.accordionist || 'accordion'; key.value = existing.keyboardist || 'keyboard';
-      acc.onchange = function () { if (!eventDraftAssignments[id]) eventDraftAssignments[id] = eventAssignmentDefaults(); eventDraftAssignments[id].accordionist = acc.value; };
-      key.onchange = function () { if (!eventDraftAssignments[id]) eventDraftAssignments[id] = eventAssignmentDefaults(); eventDraftAssignments[id].keyboardist = key.value; };
-      accLabel.appendChild(acc); keyLabel.appendChild(key); controls.append(accLabel, keyLabel); row.appendChild(controls); chosen.appendChild(row);
+      var controls = document.createElement('div'); controls.className = 'fc-section-control';
+      var keyMeta = document.createElement('span'); keyMeta.className = 'fc-section-key';
+      keyMeta.textContent = s && s.key ? 'Tono ' + displayKeyName(s.key) : 'Tono no especificado';
+      var sectionLabel = document.createElement('label'); sectionLabel.textContent = 'Bloque del repertorio';
+      var section = document.createElement('select'); section.setAttribute('aria-label', 'Bloque musical de ' + (s ? s.title : 'la canción'));
+      [['accordion','🪗 Acordeón'],['keyboard','🎹 Teclado']].forEach(function (item) { var option = document.createElement('option'); option.value = item[0]; option.textContent = item[1]; section.appendChild(option); });
+      var existing = eventDraftAssignments[id] || eventAssignmentDefaults();
+      if (existing.section !== 'accordion' && existing.section !== 'keyboard') existing.section = 'accordion';
+      section.value = existing.section;
+      section.onchange = function () {
+        if (!eventDraftAssignments[id]) eventDraftAssignments[id] = eventAssignmentDefaults();
+        eventDraftAssignments[id].section = section.value;
+        // Al cambiar el bloque, limpia excepciones previas para que se aplique la regla automática.
+        var prefix = (window.currentEventId || 'catalog') + ':' + id + ':';
+        delete instrumentOverrides[prefix + 'accordionist'];
+        delete instrumentOverrides[prefix + 'keyboardist'];
+        localStorage.setItem(OVERRIDE_KEY, safeJson(instrumentOverrides));
+      };
+      sectionLabel.appendChild(section); controls.append(keyMeta, sectionLabel); row.appendChild(controls); chosen.appendChild(row);
     });
     window.renderSongPicker();
   };
@@ -1173,20 +1225,37 @@
       l.appendChild(row);
     });
   };
-  window.openEvent = function (id) { var ev = window.findEvent(id); if (!ev) return; window.currentEventId = id; window.renderEventPlaylist(); window.show('vplaylist'); };
+  window.openEvent = function (id) { var ev = window.findEvent(id); if (!ev) return; window.currentEventId = id; window.fcPlaylistCategoryFilter = 'all'; window.renderEventPlaylist(); window.show('vplaylist'); };
   window.renderEventPlaylist = function () {
     var ev = window.findEvent(window.currentEventId); if (!ev) return;
     $('playlistName').textContent = ev.name;
-    $('playlistMeta').textContent = (ev.songIds || []).length + ' canciones · duración aproximada: ' + window.formatDuration(window.eventDuration(ev.songIds)) + ' (' + window.formatDurationLong(window.eventDuration(ev.songIds)) + ')' + (isConnected() ? ' · Banda sincronizada' : ' · Guardado en este teléfono');
+    var accordionCount = (ev.songIds || []).filter(function (id) { return getSongSection(id, ev) === 'accordion'; }).length;
+    var keyboardCount = (ev.songIds || []).filter(function (id) { return getSongSection(id, ev) === 'keyboard'; }).length;
+    $('playlistMeta').textContent = (ev.songIds || []).length + ' canciones · ' + accordionCount + ' Acordeón · ' + keyboardCount + ' Teclado · duración: ' + window.formatDurationLong(window.eventDuration(ev.songIds)) + (isConnected() ? ' · Banda sincronizada' : ' · Guardado en este teléfono');
     $('playlistMode').textContent = isConnected() ? roleName(memberRole) : (window.mode === 's' ? 'Vista cantante' : 'Vista bajista');
     $('playlistModeToggle').style.display = 'none';
     $('playlistEdit').style.display = (!isConnected() || canManageEvents()) ? '' : 'none';
     $('eventShare').style.display = isConnected() ? 'none' : '';
     var shareArea = document.querySelector('.event-share-area'); if (shareArea) shareArea.style.display = isConnected() ? 'none' : '';
-    var l = $('playlistSongs'); l.innerHTML = '';
+    var l = $('playlistSongs');
+    var filters = $('playlistCategoryFilters');
+    if (!filters) { filters = document.createElement('div'); filters.id = 'playlistCategoryFilters'; filters.className = 'fc-category-filters'; l.parentNode.insertBefore(filters, l); }
+    filters.innerHTML = '';
+    var activeFilter = window.fcPlaylistCategoryFilter || 'all';
+    [['all','Todas (' + (ev.songIds || []).length + ')'],['accordion','Acordeón (' + accordionCount + ')'],['keyboard','Teclado (' + keyboardCount + ')']].forEach(function (item) {
+      var button = document.createElement('button'); button.type = 'button'; button.textContent = item[1]; button.className = activeFilter === item[0] ? 'active' : '';
+      button.setAttribute('aria-pressed', activeFilter === item[0] ? 'true' : 'false');
+      button.onclick = function () { window.fcPlaylistCategoryFilter = item[0]; window.renderEventPlaylist(); };
+      filters.appendChild(button);
+    });
+    l.innerHTML = '';
     if (!ev.songIds || !ev.songIds.length) { var empty = document.createElement('div'); empty.className = 'playlist-empty'; empty.textContent = 'Esta carpeta todavía no tiene canciones.'; l.appendChild(empty); return; }
+    var visibleCount = 0;
     ev.songIds.forEach(function (id, i) {
+      var section = getSongSection(id, ev);
+      if (activeFilter !== 'all' && section !== activeFilter) return;
       var s = window.find(id); if (!s) return;
+      visibleCount++;
       var row = document.createElement('div'); row.className = 'playlist-song';
       if (liveState && liveState.eventId === ev.id && liveState.songId === id) row.classList.add('fc-live-song');
       var no = document.createElement('span'); no.className = 'playlist-number'; no.textContent = String(i + 1).padStart(2, '0');
@@ -1194,12 +1263,14 @@
       var title = document.createElement('strong'); title.textContent = s.title;
       var detail = document.createElement('small');
       var assignment = ev.assignments && ev.assignments[id] || eventAssignmentDefaults();
-      detail.textContent = (s.key ? 'Tono ' + s.key : 'Sin tonalidad') + ' · ' + window.formatDuration(window.songDuration(s)) + ' aprox.' + (memberRole === 'accordionist' ? ' · Tú: ' + (assignment.accordionist === 'guitar' ? 'Guitarra' : 'Acordeón') : memberRole === 'keyboardist' ? ' · Tú: ' + (assignment.keyboardist === 'guitar' ? 'Guitarra' : 'Teclado') : '');
+      var instrumentForThisRole = memberRole === 'accordionist' ? getAssignment(id, 'accordionist') : memberRole === 'keyboardist' ? getAssignment(id, 'keyboardist') : '';
+      detail.textContent = (section === 'keyboard' ? 'TECLADO' : 'ACORDEÓN') + ' · ' + (s.key ? 'Tono ' + displayKeyName(s.key) : 'Sin tonalidad') + ' · ' + window.formatDuration(window.songDuration(s)) + ' aprox.' + (instrumentForThisRole ? ' · Tú: ' + (instrumentForThisRole === 'guitar' ? 'Guitarra / acordes' : instrumentForThisRole === 'accordion' ? 'Acordeón / letra en vivo' : 'Teclado / letra en vivo') : '');
       open.append(title, detail); open.onclick = function () { window.openSong(s.id, 'vplaylist'); };
       row.append(no, open);
       if (memberRole === 'voice1' && db && bandId) { var play = document.createElement('button'); play.className = 'p fc-play-song'; play.textContent = (liveState && liveState.songId === id && liveState.eventId === ev.id) ? 'En curso' : '▶ Tocar'; play.disabled = liveState && liveState.songId === id && liveState.eventId === ev.id; play.onclick = function () { setLiveSong(ev.id, s.id, i); window.openSong(s.id, 'vplaylist'); }; row.appendChild(play); }
       l.appendChild(row);
     });
+    if (!visibleCount) { var filteredEmpty = document.createElement('div'); filteredEmpty.className = 'playlist-empty'; filteredEmpty.textContent = 'No hay canciones en este bloque.'; l.appendChild(filteredEmpty); }
     renderLiveBanner();
   };
 
@@ -1243,7 +1314,7 @@
         return;
       }
       var registration = await navigator.serviceWorker.getRegistration('./');
-      if (!registration) registration = await navigator.serviceWorker.register('./sw.js?v=15');
+      if (!registration) registration = await navigator.serviceWorker.register('./sw.js?v=16');
       var controllerChanged = new Promise(function (resolve) {
         var finished = false;
         var finish = function () {
@@ -1398,7 +1469,7 @@
       '.fc-status{padding:9px 11px;border-radius:10px;font-size:13px;font-weight:700;background:var(--bg)}.fc-status.success{color:#16764b;background:rgba(22,139,88,.10)}.fc-status.warning{color:#946200;background:rgba(220,160,30,.13)}.fc-status.error{color:#b3261e;background:rgba(179,38,30,.10)}' +
       '.fc-field-label{font-size:12px;color:var(--mut);font-weight:800;margin-top:3px}.fc-auth-row,.fc-invite-row{display:flex;gap:7px}.fc-auth-row button,.fc-invite-row button{flex:1;min-width:0}.fc-band-box{border-top:1px solid var(--line);padding-top:10px;display:flex;flex-direction:column;gap:8px}.fc-member-admin{border-top:1px solid var(--line);padding-top:10px}.fc-member-head{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:8px}.fc-member-row{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line)}.fc-member-info{flex:1;min-width:0}.fc-member-info strong,.fc-member-info small{display:block;overflow-wrap:anywhere}.fc-member-info small{font-size:11px;color:var(--mut)}.fc-member-row select{width:47%;min-width:128px;padding:7px;font-size:12px}.fc-sync-panel code{font-size:10px;overflow-wrap:anywhere}.fc-sync-panel #fcProfileSelect{width:100%}.fc-sync-panel #fcCopyUid{font-size:11px;min-height:30px;padding:4px 8px}.fc-follow-row{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700}.fc-follow-row input{width:18px;min-height:18px;height:18px}.fc-live-banner{width:calc(100% - 24px);margin:0 12px 8px;text-align:left;background:rgba(22,139,88,.12);border-color:rgba(22,139,88,.35);color:var(--fg);font-size:13px;font-weight:850;display:flex;align-items:center;gap:8px}.fc-live-banner span:nth-child(2){flex:1}.fc-live-dot{width:9px;height:9px;border-radius:100%;background:#16a36a;display:inline-block}.fc-role-bar{padding:8px 12px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:var(--bg)}.fc-role-line{display:flex;align-items:center;justify-content:space-between;gap:7px;width:100%;font-size:12px}.fc-role-line button{font-size:12px;min-height:36px;padding:6px 9px}.fc-role-bar select{min-height:38px;font-size:13px}.fc-next-only{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px 18px;gap:12px;overflow:auto}.fc-next-chip{padding:6px 12px;border-radius:20px;background:var(--acc);color:var(--accfg);font-weight:900;font-size:12px}.fc-next-caption{font-size:11px;color:var(--mut);font-weight:900;letter-spacing:.12em}.fc-next-current{font-size:clamp(25px,6vw,38px);font-weight:900;line-height:1.1}.fc-next-title{font-size:clamp(28px,8vw,48px);font-weight:950;color:var(--acc);line-height:1.08}.fc-next-key{font-size:14px;color:var(--mut);font-weight:800}.fc-event-selected-row{display:block}.fc-event-song-head{display:flex;align-items:center;gap:7px}.fc-assignment-controls{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:7px 3px 2px 29px}.fc-assignment-controls label{font-size:10px;color:var(--mut);font-weight:800}.fc-assignment-controls select{display:block;min-height:35px;font-size:12px;padding:5px;margin-top:3px}.fc-live-song{background:rgba(22,139,88,.09);border-radius:10px;padding-left:8px;padding-right:8px}.fc-play-song{font-size:12px;padding:7px 9px;min-height:36px}' +
       '.fc-member-device{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 8px 8px 28px;font-size:11px;color:var(--mut)}.fc-member-device button{min-height:30px;padding:4px 8px;font-size:11px}.fc-pair-actions{border:1px solid var(--line);border-radius:13px;padding:12px;background:var(--bg);display:flex;flex-direction:column;gap:9px}.fc-pair-actions p{margin:0}.fc-pair-actions button{width:100%;min-height:44px}.fc-pair-box{border:1px solid var(--line);border-radius:13px;padding:12px;background:var(--bg);display:flex;flex-direction:column;gap:9px}.fc-pair-title{font-size:16px;font-weight:900}.fc-pair-qr{display:flex;justify-content:center;align-items:center;background:#fff;border-radius:10px;padding:12px;min-height:230px}.fc-pair-qr img{max-width:100%;height:auto}.fc-pair-url{font-size:10px;color:var(--mut);overflow-wrap:anywhere;user-select:text}.fc-pair-box button{width:100%}' +
-      '.fc-live-row-current{outline:1px solid color-mix(in srgb,var(--acc) 25%,transparent);outline-offset:3px;border-radius:7px}.fc-profile-gate{position:fixed;inset:0;z-index:2000;display:grid;place-items:center;padding:18px;background:rgba(7,14,25,.78);backdrop-filter:blur(7px)}.fc-profile-card{width:min(100%,480px);max-height:90dvh;overflow:auto;background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:22px;padding:20px;box-shadow:0 18px 60px rgba(0,0,0,.3);display:flex;flex-direction:column;gap:12px}.fc-profile-brand{width:48px;height:48px;border-radius:15px;display:grid;place-items:center;background:var(--acc);color:var(--accfg);font-size:28px}.fc-profile-title{font-size:24px}.fc-profile-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.fc-profile-grid button{min-height:76px;text-align:left;display:flex;flex-direction:column;gap:4px;padding:11px}.fc-profile-grid button b{font-size:14px}.fc-profile-grid button small{color:var(--mut);font-size:11px}.fc-profile-foot{margin:0}.fc-mini-player{position:fixed;left:10px;right:10px;bottom:calc(8px + env(safe-area-inset-bottom));z-index:1100;display:flex;flex-direction:column;gap:5px;padding:9px 11px 7px;border:1px solid color-mix(in srgb,var(--acc) 38%,var(--line));border-radius:14px;background:color-mix(in srgb,var(--card) 94%,transparent);color:var(--fg);box-shadow:0 8px 26px rgba(0,0,0,.18);backdrop-filter:blur(12px)}body.fc-reader-open .fc-mini-player{bottom:calc(98px + env(safe-area-inset-bottom))}.fc-mini-top{display:flex;align-items:center;gap:6px;font-size:10px;font-weight:900;letter-spacing:.06em;color:var(--mut);min-width:0}.fc-mini-live-dot{width:8px;height:8px;border-radius:50%;background:#18a66a;flex:0 0 auto}.fc-mini-player.is-paused .fc-mini-live-dot{background:#d49b2e}.fc-mini-event{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;font-weight:700;letter-spacing:0}.fc-mini-state{white-space:nowrap}.fc-mini-main{display:flex;align-items:center;gap:9px;min-width:0}.fc-mini-copy{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}.fc-mini-copy strong{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.fc-mini-copy span{font-size:11px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.fc-mini-main button{min-height:35px;padding:6px 9px;font-size:11px;font-weight:850;white-space:nowrap}.fc-mini-player.is-free{border-color:color-mix(in srgb,#d49b2e 55%,var(--line))}.fc-mini-progress-track{height:3px;background:var(--line);border-radius:99px;overflow:hidden}.fc-mini-progress-track span{height:100%;display:block;width:0;background:var(--acc);transition:width .2s}.fc-mini-progress-text{position:absolute;right:11px;top:8px;font-size:9px;color:var(--mut);display:none}#list{padding-bottom:100px}.event-list{padding-bottom:100px}';
+      '.fc-live-row-current{outline:1px solid color-mix(in srgb,var(--acc) 25%,transparent);outline-offset:3px;border-radius:7px}.fc-profile-gate{position:fixed;inset:0;z-index:2000;display:grid;place-items:center;padding:18px;background:rgba(7,14,25,.78);backdrop-filter:blur(7px)}.fc-profile-card{width:min(100%,480px);max-height:90dvh;overflow:auto;background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:22px;padding:20px;box-shadow:0 18px 60px rgba(0,0,0,.3);display:flex;flex-direction:column;gap:12px}.fc-profile-brand{width:48px;height:48px;border-radius:15px;display:grid;place-items:center;background:var(--acc);color:var(--accfg);font-size:28px}.fc-profile-title{font-size:24px}.fc-profile-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.fc-profile-grid button{min-height:76px;text-align:left;display:flex;flex-direction:column;gap:4px;padding:11px}.fc-profile-grid button b{font-size:14px}.fc-profile-grid button small{color:var(--mut);font-size:11px}.fc-profile-foot{margin:0}.fc-request-row{display:grid;grid-template-columns:minmax(0,1fr);gap:9px;align-items:stretch}.fc-request-info{min-width:0;width:100%}.fc-request-info strong{white-space:normal;overflow-wrap:normal;word-break:normal}.fc-request-info small{white-space:normal;overflow-wrap:anywhere;word-break:normal;line-height:1.35}.fc-request-actions{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:7px;align-items:center;min-width:0}.fc-request-actions select{width:100%;min-width:0;max-width:100%;font-size:12px;padding:7px}.fc-request-actions button{min-width:0;white-space:nowrap}.fc-request-reject{padding-left:10px;padding-right:10px}.fc-admin-member-row{min-width:0}.fc-admin-member-row .fc-member-info{min-width:0}.fc-admin-member-row .fc-member-info small{overflow-wrap:normal;word-break:normal;line-height:1.35}.fc-section-control{display:grid;grid-template-columns:minmax(0,1fr) minmax(145px, .9fr);align-items:center;gap:9px;padding:8px 4px 3px 29px}.fc-section-key{font-size:11px;color:var(--mut);font-weight:800}.fc-section-control label{display:flex;align-items:center;gap:7px;justify-content:flex-end;font-size:11px;color:var(--mut);font-weight:800}.fc-section-control select{width:100%;min-width:0;min-height:36px;font-size:12px;padding:5px}.fc-category-filters{display:flex;gap:7px;overflow-x:auto;padding:9px 12px 4px;scrollbar-width:none}.fc-category-filters::-webkit-scrollbar{display:none}.fc-category-filters button{flex:1 0 auto;min-height:35px;padding:6px 12px;border-radius:11px;font-size:12px;font-weight:850;white-space:nowrap;background:var(--bg);color:var(--mut);box-shadow:none}.fc-category-filters button.active{background:var(--acc);color:var(--accfg)}.fc-mini-player{position:fixed;left:10px;right:10px;bottom:calc(8px + env(safe-area-inset-bottom));z-index:1100;display:flex;flex-direction:column;gap:5px;padding:9px 11px 7px;border:1px solid color-mix(in srgb,var(--acc) 38%,var(--line));border-radius:14px;background:color-mix(in srgb,var(--card) 94%,transparent);color:var(--fg);box-shadow:0 8px 26px rgba(0,0,0,.18);backdrop-filter:blur(12px)}body.fc-reader-open .fc-mini-player{bottom:calc(98px + env(safe-area-inset-bottom))}.fc-mini-top{display:flex;align-items:center;gap:6px;font-size:10px;font-weight:900;letter-spacing:.06em;color:var(--mut);min-width:0}.fc-mini-live-dot{width:8px;height:8px;border-radius:50%;background:#18a66a;flex:0 0 auto}.fc-mini-player.is-paused .fc-mini-live-dot{background:#d49b2e}.fc-mini-event{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;font-weight:700;letter-spacing:0}.fc-mini-state{white-space:nowrap}.fc-mini-main{display:flex;align-items:center;gap:9px;min-width:0}.fc-mini-copy{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}.fc-mini-copy strong{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.fc-mini-copy span{font-size:11px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.fc-mini-main button{min-height:35px;padding:6px 9px;font-size:11px;font-weight:850;white-space:nowrap}.fc-mini-player.is-free{border-color:color-mix(in srgb,#d49b2e 55%,var(--line))}.fc-mini-progress-track{height:3px;background:var(--line);border-radius:99px;overflow:hidden}.fc-mini-progress-track span{height:100%;display:block;width:0;background:var(--acc);transition:width .2s}.fc-mini-progress-text{position:absolute;right:11px;top:8px;font-size:9px;color:var(--mut);display:none}.fc-sync-panel .fc-request-row{display:grid;grid-template-columns:minmax(0,1fr);}.fc-sync-panel .fc-request-actions{grid-template-columns:minmax(0,1fr) auto auto}#list{padding-bottom:100px}.event-list{padding-bottom:100px}@media(max-width:480px){.fc-sync-panel .fc-request-actions{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.fc-sync-panel .fc-request-actions select{grid-column:1/-1}.fc-sync-panel .fc-request-actions button{width:100%;min-height:39px}.fc-sync-panel .fc-admin-member-row{display:grid;grid-template-columns:minmax(0,1fr);gap:7px}.fc-sync-panel .fc-admin-member-row select{width:100%;min-width:0;max-width:100%}.fc-sync-panel .fc-admin-member-row button{width:100%}.fc-section-control{grid-template-columns:1fr;gap:5px;padding-left:29px}.fc-section-control label{justify-content:space-between}.fc-section-control select{max-width:100%}}';
     var style = document.createElement('style'); style.textContent = css; document.head.appendChild(style);
   }
 

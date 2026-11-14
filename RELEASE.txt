@@ -1,9 +1,12 @@
-Frecuencia Cero V15 - Separación de crear banda y generar QR; actualización manual segura; menú Más simplificado.
+Frecuencia Cero V16 - Presencia robusta, bloques Acordeón/Teclado y solicitudes móviles.
 
-- El iPhone propietario ve «Crear banda» como acción independiente.
-- Después de quedar conectado aparece «Generar código QR para vincular otro dispositivo».
-- Los dispositivos nuevos conservan únicamente la acción «Escanear código QR».
-- Se agrega «Buscar actualizaciones» y etiqueta discreta «Frecuencia Cero · V15».
-- Se retira del menú Más el importador masivo de canciones y sus instrucciones; se conserva el alta individual desde el botón + y el procesador de acordes dentro del editor.
-- Se conserva el respaldo de canciones y eventos, el cambio de tema y el panel de banda/sincronización.
-- La versión de caché se incrementa a V15; la actualización no borra localStorage ni la identidad anónima de Firebase.
+- La presencia se vuelve a registrar cada vez que Firebase recupera la conexión (.info/connected), evitando estados desconectados obsoletos tras cambios de red/suspensión.
+- Solicitudes de integrantes se reorganizan en móvil: descripción y controles en bloques legibles, sin texto vertical.
+- La administración de integrantes aclara cuando el perfil es el abierto en el dispositivo actual.
+- Cada canción de un evento se asigna a un bloque: Acordeón o Teclado.
+- La lista del evento añade filtros Todas / Acordeón / Teclado, mostrando tonalidad y duración sin alterar el orden maestro del cantante.
+- Reglas automáticas: perfil Acordeonista + bloque Teclado = Guitarra (acordes y letra); perfil Acordeonista + bloque Acordeón = letra sincronizada. Perfil Tecladista + bloque Acordeón = Guitarra (acordes y letra); perfil Tecladista + bloque Teclado = letra sincronizada.
+- Se conserva el selector manual de instrumento dentro de la canción como excepción temporal al modo automático.
+- Se conserva el mini reproductor: muestra evento, canción y renglón en vivo; al navegar por catálogo/eventos se puede volver a la posición compartida con un botón.
+- El orden general del repertorio no se divide ni se reordena por categoría; los filtros solo cambian lo que se muestra en la lista.
+- La versión y caché se incrementan a V16. UID propietario conservado.

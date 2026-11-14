@@ -1,4 +1,4 @@
-const CACHE_NAME = 'frecuencia-cero-shell-v15-separated-qr-update-menu';
+const CACHE_NAME = 'frecuencia-cero-shell-v16-keyboard-blocks-presence-mobile-fix';
 const APP_FILES = [
   './',
   './index.html',
