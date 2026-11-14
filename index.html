@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#f3f5f7">
-<meta name="fc-build" content="live-sync-v16-keyboard-blocks-presence-mobile-fix">
+<meta name="fc-build" content="live-sync-v17-revocation-lockout">
 <title>Frecuencia Cero – Letras y acordes</title>
 <meta name="application-name" content="Frecuencia Cero">
 <meta name="apple-mobile-web-app-title" content="Frecuencia Cero">
@@ -378,7 +378,7 @@ body{
   </div>
   <p id="mmsg" class="note" aria-live="polite"></p>
   <div class="fc-app-meta">
-   <span id="fcAppVersion">Frecuencia Cero · V16</span>
+   <span id="fcAppVersion">Frecuencia Cero · V17</span>
    <button id="fcCheckUpdates" type="button">↻ Buscar actualizaciones</button>
   </div>
   <p id="fcUpdateStatus" class="fc-update-status" aria-live="polite">La versión instalada se conserva al actualizar.</p>
@@ -609,7 +609,13 @@ document.addEventListener('visibilitychange',function(){if(document.visibilitySt
 document.addEventListener('keydown',function(e){if(!$('vr').classList.contains('on'))return;if(e.target&&(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA'||e.target.tagName==='SELECT'))return;if(mode==='b'){if(e.key==='ArrowRight'||e.key==='ArrowDown'||e.key==='PageDown'){e.preventDefault();$('bnext').click()}else if(e.key==='ArrowLeft'||e.key==='ArrowUp'||e.key==='PageUp'){e.preventDefault();$('bprev').click()}else if(e.key===' '){e.preventDefault();startBassAuto()}}else if(e.key===' '){e.preventDefault();goSinger()}});
 $('et').addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();$('ekey').focus()}});
 $('eventsBack').onclick=function(){show('vl')};$('eventNew').onclick=function(){editEvent(null)};$('eventEditBack').onclick=function(){renderEvents();show('vse')};$('eventCancel').onclick=function(){renderEvents();show('vse')};$('eventSave').onclick=saveEventEditor;$('eventDelete').onclick=deleteEvent;$('eventSongSearch').oninput=renderSongPicker;$('eventImportBtn').onclick=importSharedEvent;$('playlistBack').onclick=function(){show('vse')};$('playlistEdit').onclick=function(){editEvent(currentEventId)};$('playlistModeToggle').onclick=function(){mode=mode==='s'?'b':'s';safeStore('letras_mode',mode);syncModeButton();renderEventPlaylist()};$('eventShare').onclick=shareCurrentEvent;
-load();seedCatalog();seedLegacyEvent();syncModeButton();setNotation();render();
+// En dispositivos previamente vinculados no se muestra la copia local compartida
+// hasta que Firebase confirme que el perfil sigue autorizado. Esto evita que un
+// miembro retirado vea el catálogo antiguo mientras se verifica su acceso.
+var FC_LOCK_SHARED_CACHE_AT_BOOT = !!localStorage.getItem('fc_band_id_v1') || localStorage.getItem('fc_band_access_revoked_v17') === '1';
+function loadUiPreferencesOnly(){try{fs=+localStorage.getItem('letras_fs')||30;defaultSpeed=+localStorage.getItem('letras_sp')||30;mode=localStorage.getItem('letras_mode')||'s';bassNotation=localStorage.getItem('letras_bass_notation')||'en'}catch(e){}}
+if(FC_LOCK_SHARED_CACHE_AT_BOOT){songs=[];events=[];loadUiPreferencesOnly();}else{load();seedCatalog();seedLegacyEvent();}
+syncModeButton();setNotation();render();
 </script>
 
 

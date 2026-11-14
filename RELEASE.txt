@@ -1,12 +1,13 @@
-Frecuencia Cero V16 - Presencia robusta, bloques Acordeón/Teclado y solicitudes móviles.
+Frecuencia Cero V17 — Revocación real de integrantes y dispositivos
 
-- La presencia se vuelve a registrar cada vez que Firebase recupera la conexión (.info/connected), evitando estados desconectados obsoletos tras cambios de red/suspensión.
-- Solicitudes de integrantes se reorganizan en móvil: descripción y controles en bloques legibles, sin texto vertical.
-- La administración de integrantes aclara cuando el perfil es el abierto en el dispositivo actual.
-- Cada canción de un evento se asigna a un bloque: Acordeón o Teclado.
-- La lista del evento añade filtros Todas / Acordeón / Teclado, mostrando tonalidad y duración sin alterar el orden maestro del cantante.
-- Reglas automáticas: perfil Acordeonista + bloque Teclado = Guitarra (acordes y letra); perfil Acordeonista + bloque Acordeón = letra sincronizada. Perfil Tecladista + bloque Acordeón = Guitarra (acordes y letra); perfil Tecladista + bloque Teclado = letra sincronizada.
-- Se conserva el selector manual de instrumento dentro de la canción como excepción temporal al modo automático.
-- Se conserva el mini reproductor: muestra evento, canción y renglón en vivo; al navegar por catálogo/eventos se puede volver a la posición compartida con un botón.
-- El orden general del repertorio no se divide ni se reordena por categoría; los filtros solo cambian lo que se muestra en la lista.
-- La versión y caché se incrementan a V16. UID propietario conservado.
+- Se detecta la eliminación del registro miembro/dispositivo en el listener propio y también los errores PERMISSION_DENIED del catálogo, eventos y estado en vivo.
+- El cliente revocado detiene controles y listeners, limpia la copia local de canciones/eventos y abre una pantalla bloqueante de perfil.
+- El usuario retirado debe elegir una función y solicitar reincorporación; el acceso no se restaura hasta una nueva aprobación.
+- La revocación conserva la identidad anónima Firebase, pero elimina la autorización de la banda.
+- La baja de integrante es una actualización atómica: miembro, dispositivos, presencia, solicitudes, QR pendientes y estado live si era Voz 1.
+- Revocar solo un dispositivo mantiene intacto al resto de dispositivos del mismo integrante y obliga al dispositivo retirado a escanear un QR nuevo.
+- Reglas RTDB endurecidas: acceso a catálogo/eventos/live/presencia requiere pertenencia vigente; los dispositivos secundarios dependen de que el miembro de referencia siga existiendo; QR requieren creador todavía autorizado.
+- Al iniciar, dispositivos previamente asociados esperan la verificación de pertenencia antes de desbloquear el catálogo.
+- Caché/Service Worker V17; UID propietario conservado.
+
+Nota: las reglas V17 deben publicarse manualmente en Firebase Console. Subir solo los archivos a GitHub no activa la revocación del lado del servidor.

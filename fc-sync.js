@@ -4,10 +4,17 @@
 (function () {
   'use strict';
 
-  var APP_VERSION = 'V16';
+  var APP_VERSION = 'V17';
   var CFG_KEY = 'fc_firebase_config_v1';
   var BAND_KEY = 'fc_band_id_v1';
   var PROFILE_KEY = 'fc_device_profile_v1';
+  var ACCESS_REVOKED_KEY = 'fc_band_access_revoked_v17';
+  var ACCESS_REVOKED_MODE_KEY = 'fc_band_access_revoked_mode_v17';
+  var IDENTITY_KIND_KEY = 'fc_identity_kind_v17';
+  var accessRevoked = localStorage.getItem(ACCESS_REVOKED_KEY) === '1';
+  var accessVerificationPending = !!localStorage.getItem(BAND_KEY) && !accessRevoked;
+  var revocationMode = localStorage.getItem(ACCESS_REVOKED_MODE_KEY) || 'member';
+  var handlingRevocation = false;
   var FIXED_BAND_ID = 'frecuencia-cero-main';
   // UID anónimo del dispositivo principal del propietario técnico (Acordeonista).
   var OWNER_UID = 'qZCvhHTK3MUhcABIlZlRyrqHKdC2';
@@ -100,7 +107,7 @@
     node.className = 'fc-status ' + (kind || 'neutral');
   }
   function setText(id, value) { var node = $(id); if (node) node.textContent = value; }
-  function isConnected() { return !!(db && auth && currentUser && bandId); }
+  function isConnected() { return !!(db && auth && currentUser && bandId && memberProfile && memberProfile.role && memberProfile.role !== 'pending' && memberRole !== 'pending'); }
   function isDirector() { return isConnected() ? memberRole === 'voice1' : false; }
   function isTechnicalOwner() {
     if (!currentUser) return false;
@@ -272,6 +279,9 @@
     bandId = FIXED_BAND_ID; localStorage.setItem(BAND_KEY, bandId);
     identityKind = kind;
     memberRole = profile.role; memberProfile = profile;
+    accessRevoked = false; accessVerificationPending = false; handlingRevocation = false; revocationMode = 'member';
+    localStorage.removeItem(ACCESS_REVOKED_KEY); localStorage.removeItem(ACCESS_REVOKED_MODE_KEY);
+    localStorage.setItem(IDENTITY_KIND_KEY, kind || 'members');
     selectedProfileRole = profile.role; localStorage.setItem(PROFILE_KEY, profile.role);
     window.fcJoinRequestPending = false;
     if (attachedUid !== id) attachBand(FIXED_BAND_ID, kind);
@@ -310,8 +320,15 @@
     refs.selfRequest.on('value', function (snap) {
       var req = snap.val();
       window.fcJoinRequestPending = !!req;
-      if (req) setStatus('Solicitud enviada como ' + roleName(req.requestedRole) + '. Esperando aprobación del propietario técnico.', 'warning');
-      else if (!bandId && currentUser && !memberProfile) setStatus('Selecciona tu perfil o escanea un QR de vinculación.', 'neutral');
+      if (req) {
+        setStatus('Solicitud enviada como ' + roleName(req.requestedRole) + '. Esperando aprobación del propietario técnico.', 'warning');
+        if (accessRevoked && req.requestedRole) { selectedProfileRole = req.requestedRole; localStorage.setItem(PROFILE_KEY, req.requestedRole); }
+      } else if (!bandId && currentUser && !memberProfile) setStatus('Selecciona tu perfil o escanea un QR de vinculación.', 'neutral');
+      if (accessRevoked) {
+        var gateStatus = $('fcGateStatus'); var gateRequest = $('fcGateRequestJoin');
+        if (req) { if (gateStatus) gateStatus.textContent = 'Solicitud enviada como ' + roleName(req.requestedRole) + '. Esperando aprobación del propietario.'; if (gateRequest) { gateRequest.disabled = true; gateRequest.textContent = 'Solicitud pendiente'; } }
+        else if (gateRequest) { gateRequest.disabled = !selectedProfileRole; gateRequest.textContent = 'Solicitar reincorporación'; }
+      }
       updateSyncButtons();
     }, function (err) {
       if (err && err.code !== 'PERMISSION_DENIED') setStatus('No se pudo consultar la solicitud: ' + err.message, 'error');
@@ -319,6 +336,10 @@
   }
   function finishUnjoinedIdentity() {
     if (bandId || memberProfile) return;
+    if (localStorage.getItem(BAND_KEY)) {
+      handleAccessRevoked('Este perfil ya no está autorizado en la banda. Selecciona tu función y solicita nuevamente el acceso.');
+      return;
+    }
     memberRole = window.fcJoinRequestPending ? 'pending' : 'unjoined';
     identityKind = 'members';
     updateSyncButtons();
@@ -367,6 +388,7 @@
   async function requestJoin() {
     try {
       if (!currentUser || !db) throw new Error('Espera a que Firebase identifique este teléfono.');
+      if (accessRevoked && revocationMode === 'devices') throw new Error('Este perfil sigue perteneciendo a la banda. Escanea un nuevo QR desde un dispositivo autorizado para volver a vincular este teléfono.');
       var role = selectedProfileRole || ($('fcProfileSelect') && $('fcProfileSelect').value);
       if (!role || role === 'accordionist' || !ROLE_OPTIONS.some(function (r) { return r[0] === role; })) throw new Error('La función Acordeonista está reservada al propietario técnico. Selecciona otra función disponible.');
       if (bandId) throw new Error('Este teléfono ya pertenece a la banda.');
@@ -377,6 +399,10 @@
       selectedProfileRole = role; localStorage.setItem(PROFILE_KEY, role);
       window.fcJoinRequestPending = true;
       setStatus('Solicitud enviada. El propietario técnico aprobará tu función desde Mi banda y sincronización.', 'success');
+      if (accessRevoked) {
+        var gateStatus = $('fcGateStatus'); if (gateStatus) gateStatus.textContent = 'Solicitud enviada. El propietario debe aprobarla para recuperar el acceso al catálogo y los eventos.';
+        var gateRequest = $('fcGateRequestJoin'); if (gateRequest) { gateRequest.disabled = true; gateRequest.textContent = 'Solicitud pendiente'; }
+      }
       updateSyncButtons();
     } catch (err) {
       var msg = err && err.code === 'PERMISSION_DENIED' ? 'No se pudo enviar la solicitud. Primero el propietario técnico debe crear la banda y publicar las reglas correctas.' : (err.message || 'Error desconocido.');
@@ -419,12 +445,26 @@
     refs.events = root.child('events');
     refs.live = root.child('live');
     refs.presence = root.child('presence/' + currentUser.uid);
-    refs.meta.on('value', function (snap) { bandMeta = snap.val() || {}; updateSyncButtons(); });
+    refs.meta.on('value', function (snap) { bandMeta = snap.val() || {}; updateSyncButtons(); }, function (err) {
+      if (err && err.code === 'PERMISSION_DENIED') handleAccessRevoked('Firebase ya no autoriza este dispositivo para consultar la banda.');
+    });
+    var mineWasAuthorized = !!(memberProfile && memberProfile.role && memberProfile.role !== 'pending');
     refs.mine.on('value', function (snap) {
-      memberProfile = snap.val(); memberRole = memberProfile && memberProfile.role || 'pending';
+      var latestProfile = snap.val();
+      if (!latestProfile || !latestProfile.role || latestProfile.role === 'pending') {
+        if (mineWasAuthorized) handleAccessRevoked('El propietario retiró tu acceso a Frecuencia Cero. Selecciona tu perfil y solicita nuevamente la incorporación.');
+        return;
+      }
+      mineWasAuthorized = true;
+      memberProfile = latestProfile; memberRole = latestProfile.role;
       selectedProfileRole = memberRole; localStorage.setItem(PROFILE_KEY, memberRole);
+      localStorage.setItem(BAND_KEY, id);
+      accessRevoked = false; accessVerificationPending = false; revocationMode = 'member'; localStorage.removeItem(ACCESS_REVOKED_KEY); localStorage.removeItem(ACCESS_REVOKED_MODE_KEY);
+      localStorage.setItem(IDENTITY_KIND_KEY, kind);
       setStatus('Conectado · ' + roleName(memberRole), 'success');
       updateSyncButtons(); if (window.cur) applyRoleToCurrentSong();
+    }, function (err) {
+      if (mineWasAuthorized && err && err.code === 'PERMISSION_DENIED') handleAccessRevoked('Firebase rechazó el acceso de este dispositivo. El propietario debe volver a aprobarlo.');
     });
     refs.members.on('value', function (snap) { memberList = snap.val() || {}; updateMemberPresence(); renderMemberAdmin(); renderMyDevices(); renderMembersStatus(); });
     refs.devices = root.child('devices');
@@ -440,18 +480,19 @@
       renderMemberAdmin(); renderMyDevices(); renderMembersStatus();
     });
     refs.catalog.on('value', function (snap) {
-      var data = snap.val(); if (!data) return;
+      if (accessRevoked || accessVerificationPending) return;
+      var data = snap.val() || {};
       applyingRemote = true;
       window.songs = objectValues(data).sort(function (a, b) { return (a.catalogOrder == null ? 999999 : a.catalogOrder) - (b.catalogOrder == null ? 999999 : b.catalogOrder); });
       lastCatalogJson = safeJson(mapById(window.songs));
       localSaveSongs(); applyingRemote = false;
       if (typeof window.render === 'function') window.render();
       if (window.cur) { var latest = window.find(window.cur.id); if (latest) { window.cur = latest; window.paint(); applyRoleToCurrentSong(); } }
-      // Reintenta el seguimiento si el listener de live llegó antes que el catálogo.
       renderLiveBanner(); handleLiveUpdate();
-    });
+    }, function (err) { if (err && err.code === 'PERMISSION_DENIED') handleAccessRevoked('Tu acceso al catálogo fue revocado.'); });
     refs.events.on('value', function (snap) {
-      var data = snap.val(); if (!data) data = {};
+      if (accessRevoked || accessVerificationPending) return;
+      var data = snap.val() || {};
       applyingRemote = true;
       window.events = objectValues(data).sort(function (a, b) { return (a.createdAt || 0) - (b.createdAt || 0); });
       lastEventsJson = safeJson(mapById(window.events));
@@ -459,10 +500,11 @@
       if (typeof window.renderEvents === 'function') window.renderEvents();
       if (window.currentEventId && $('vplaylist') && $('vplaylist').classList.contains('on')) window.renderEventPlaylist();
       if (window.cur) applyRoleToCurrentSong();
-      // Reintenta cuando los eventos ya están disponibles localmente.
       renderLiveBanner(); handleLiveUpdate();
+    }, function (err) { if (err && err.code === 'PERMISSION_DENIED') handleAccessRevoked('Tu acceso a los eventos fue revocado.'); });
+    refs.live.on('value', function (snap) { if (accessRevoked || accessVerificationPending) return; liveState = snap.val() || null; renderLiveBanner(); handleLiveUpdate(); }, function (err) {
+      if (err && err.code === 'PERMISSION_DENIED') handleAccessRevoked('Tu acceso a la sincronización en vivo fue revocado.');
     });
-    refs.live.on('value', function (snap) { liveState = snap.val() || null; renderLiveBanner(); handleLiveUpdate(); });
     // La presencia debe registrarse en cada reconexión, no solo al abrir la app.
     // Si iOS suspende Safari/PWA o cambia la red, onDisconnect elimina el nodo;
     // .info/connected vuelve a crearlo cuando Firebase recupera la conexión.
@@ -702,13 +744,35 @@
     if (uid === ownerUid) { alert('El propietario técnico no se puede eliminar desde esta pantalla.'); return; }
     var member = memberList[uid];
     if (!member) return;
-    if (!confirm('¿Quitar a ' + (member.name || 'este integrante') + ' de Frecuencia Cero? También se revocarán sus dispositivos vinculados.')) return;
+    if (!confirm('¿Quitar a ' + (member.name || 'este integrante') + ' de Frecuencia Cero? Se cerrará su acceso y se revocarán todos sus dispositivos y códigos QR pendientes.')) return;
     try {
-      var linked = Object.keys(deviceList || {}).filter(function (deviceUid) { return deviceList[deviceUid] && deviceList[deviceUid].memberUid === uid; });
-      await db.ref(memberPath() + '/' + uid).remove();
-      await Promise.all(linked.map(function (deviceUid) { return db.ref(bandPath('devices/' + deviceUid)).remove(); }));
-      await db.ref(bandPath('joinRequests/' + uid)).remove().catch(function () {});
-      setStatus((member.name || 'Integrante') + ' retirado de la banda. La plaza quedó disponible.', 'success');
+      // Lee la lista más reciente antes de construir una única revocación atómica.
+      var snapshots = await Promise.all([
+        db.ref(bandPath('devices')).once('value'),
+        db.ref(bandPath('devicePairings')).once('value')
+      ]);
+      var latestDevices = snapshots[0].val() || {};
+      var pairings = snapshots[1].val() || {};
+      var linked = Object.keys(latestDevices).filter(function (deviceUid) { return latestDevices[deviceUid] && latestDevices[deviceUid].memberUid === uid; });
+      var revokedUids = [uid].concat(linked);
+      var updates = {};
+      updates['members/' + uid] = null;
+      updates['joinRequests/' + uid] = null;
+      updates['presence/' + uid] = null;
+      linked.forEach(function (deviceUid) {
+        updates['devices/' + deviceUid] = null;
+        updates['presence/' + deviceUid] = null;
+      });
+      // Un QR abierto antes de la baja tampoco puede seguir utilizándose.
+      Object.keys(pairings).forEach(function (token) {
+        var pair = pairings[token] || {};
+        if (pair.memberUid === uid || revokedUids.indexOf(pair.createdBy) >= 0 || revokedUids.indexOf(pair.claimedBy) >= 0) {
+          updates['devicePairings/' + token] = null;
+        }
+      });
+      if (member.role === 'voice1') updates.live = null;
+      await db.ref('bands/' + bandId).update(updates);
+      setStatus((member.name || 'Integrante') + ' retirado. Firebase revocó su perfil, dispositivos, presencia y QR pendientes.', 'success');
     } catch (err) {
       setStatus('No se pudo quitar al integrante: ' + (err.message || err), 'error');
     }
@@ -747,9 +811,12 @@
     }
     if (!confirm('¿Revocar este dispositivo? Dejará de tener acceso a Frecuencia Cero.')) return;
     try {
+      // Las rutas concretas permiten a un integrante revocar sus propios dispositivos.
+      // Los QR emitidos por ese dispositivo dejan de ser válidos porque las reglas
+      // exigen que quien los creó siga autorizado y que su registro de dispositivo exista.
       await db.ref(bandPath('devices/' + deviceUid)).remove();
       await db.ref(bandPath('presence/' + deviceUid)).remove().catch(function () {});
-      setStatus('Dispositivo revocado correctamente.', 'success');
+      setStatus('Dispositivo revocado. Sus códigos QR pendientes también dejan de ser válidos.', 'success');
       renderMyDevices(); renderMemberAdmin();
     } catch (err) {
       setStatus('No se pudo revocar el dispositivo: ' + (err.message || err), 'error');
@@ -1103,6 +1170,7 @@
 
   // Las escrituras locales del director se publican en la base compartida.
   window.save = function () {
+    if (accessRevoked || accessVerificationPending) return;
     if (typeof originalSave === 'function') originalSave();
     if (!applyingRemote && db && bandId && isTechnicalOwner()) {
       var payload = mapById(window.songs || []), serialized = safeJson(payload);
@@ -1114,6 +1182,7 @@
     }
   };
   window.saveEvents = function () {
+    if (accessRevoked || accessVerificationPending) return;
     if (typeof originalSaveEvents === 'function') originalSaveEvents();
     if (!applyingRemote && db && bandId && (isTechnicalOwner() || memberRole === 'voice1')) {
       var payload = mapById(window.events || []), serialized = safeJson(payload);
@@ -1124,6 +1193,7 @@
     }
   };
   window.openSong = function (id, backTo) {
+    if (accessRevoked || accessVerificationPending) return;
     if (!openingFromLive && memberRole !== 'voice1' && liveState && liveState.songId) {
       if (id !== liveState.songId) browseOverride = true;
       else browseOverride = false;
@@ -1133,6 +1203,7 @@
     renderMiniPlayer();
   };
   window.show = function (id) {
+    if ((accessRevoked || accessVerificationPending) && id !== 'vm') { if (typeof originalShow === 'function') originalShow('vl'); maybeShowFirstProfileGate(); return; }
     if (typeof originalShow === 'function') originalShow(id);
     document.body.classList.toggle('fc-reader-open', id === 'vr');
     if (id === 'vm') updateSyncButtons();
@@ -1295,11 +1366,77 @@
     var gate = $('fcFirstProfileGate');
     if (gate) gate.style.display = 'none';
   }
+  function handleAccessRevoked(message, revokedKind) {
+    if (handlingRevocation || (accessRevoked && !bandId && !memberProfile)) return;
+    handlingRevocation = true;
+    accessRevoked = true; accessVerificationPending = false;
+    revocationMode = revokedKind || identityKind || localStorage.getItem(IDENTITY_KIND_KEY) || 'member';
+    if (revocationMode !== 'devices') revocationMode = 'member';
+    try { localStorage.setItem(ACCESS_REVOKED_KEY, '1'); localStorage.setItem(ACCESS_REVOKED_MODE_KEY, revocationMode); } catch (e) {}
+    // Detén los controles locales y elimina todos los listeners de la banda.
+    try { if (window.stopAll) window.stopAll(); } catch (e) {}
+    try { stopPairScanner(); } catch (e) {}
+    try { closePairQr(); } catch (e) {}
+    Object.keys(refs || {}).forEach(function (key) { try { refs[key].off(); } catch (e) {} });
+    refs = {}; attachedUid = ''; watchingIdentity = false;
+    // Conserva la identidad anónima de Firebase, pero elimina la autorización local.
+    bandId = ''; bandMeta = null; memberRole = 'unjoined'; memberProfile = null;
+    memberList = {}; deviceList = {}; presenceMap = {}; joinRequestList = {};
+    liveState = null; inviteCode = ''; identityKind = 'members';
+    selectedProfileRole = ''; window.fcJoinRequestPending = false;
+    try {
+      localStorage.removeItem(BAND_KEY);
+      localStorage.removeItem(PROFILE_KEY);
+      localStorage.removeItem(IDENTITY_KIND_KEY);
+      localStorage.removeItem(window.KEY || 'letras_frecuencia_cero_v3');
+      localStorage.removeItem(window.EVENT_KEY || 'frecuencia_cero_eventos_v1');
+      localStorage.removeItem('letras_v1');
+      localStorage.removeItem('letras_fc_v2');
+    } catch (e) {}
+    // Borra la copia local que había descargado esta banda; no borra la identidad Firebase.
+    window.songs = []; window.events = []; window.cur = null; window.currentEventId = null;
+    lastCatalogJson = ''; lastEventsJson = ''; lastHandledSong = ''; lastRemotePositionKey = '';
+    if ($('rt')) $('rt').innerHTML = '';
+    if ($('fcMiniPlayer')) $('fcMiniPlayer').style.display = 'none';
+    if ($('fcLiveBanner')) $('fcLiveBanner').style.display = 'none';
+    if (typeof window.render === 'function') window.render();
+    if (typeof window.renderEvents === 'function') window.renderEvents();
+    if (typeof window.show === 'function') window.show('vl');
+    setStatus(message || 'Tu acceso fue retirado. Selecciona tu perfil y solicita nuevamente la incorporación.', 'warning');
+    firstProfileGateShown = false;
+    var gate = $('fcFirstProfileGate');
+    if (gate) {
+      var notice = $('fcGateRevokedNotice'); if (notice) { notice.style.display = ''; notice.textContent = revocationMode === 'devices' ? 'Este dispositivo fue desvinculado. Para recuperar el acceso, escanea un nuevo QR que genere otro dispositivo autorizado de tu perfil.' : 'Tu acceso a la banda fue retirado. Elige tu función y solicita nuevamente la incorporación. No podrás ver canciones ni eventos hasta que el propietario te apruebe.'; }
+      var status = $('fcGateStatus'); if (status) status.textContent = message || (revocationMode === 'devices' ? 'Este dispositivo ya no está vinculado.' : 'Tu acceso fue retirado. Selecciona tu función y solicita nuevamente la incorporación.');
+      var grid = gate.querySelector('.fc-profile-grid'); if (grid) grid.style.display = revocationMode === 'devices' ? 'none' : '';
+      var requestButton = $('fcGateRequestJoin'); if (requestButton) { requestButton.style.display = revocationMode === 'devices' ? 'none' : ''; requestButton.disabled = true; requestButton.textContent = 'Solicitar reincorporación'; }
+      var qrButton = $('fcProfileGateQr'); if (qrButton) qrButton.style.display = revocationMode === 'devices' ? '' : 'none';
+    }
+    updateSyncButtons();
+    maybeShowFirstProfileGate();
+    // Los listeners propios vuelven a quedar activos para detectar una aprobación posterior.
+    watchingIdentity = false;
+    watchOwnMembership();
+    handlingRevocation = false;
+  }
+
   function maybeShowFirstProfileGate() {
-    if (selectedProfileRole || memberProfile || !currentUser || firstProfileGateShown) return;
+    if ((!accessRevoked && !accessVerificationPending && selectedProfileRole) || memberProfile || !currentUser || firstProfileGateShown) return;
     try { if (new URL(window.location.href).searchParams.get('fc_pair')) return; } catch (e) {}
     var gate = $('fcFirstProfileGate');
     if (!gate) return;
+    if (accessVerificationPending) {
+      var noticePending = $('fcGateRevokedNotice'); if (noticePending) { noticePending.style.display = ''; noticePending.textContent = 'Verificando que este dispositivo siga autorizado. El catálogo permanecerá bloqueado hasta confirmar el acceso.'; }
+      var gridPending = gate.querySelector('.fc-profile-grid'); if (gridPending) gridPending.style.display = 'none';
+      var requestPending = $('fcGateRequestJoin'); if (requestPending) requestPending.style.display = 'none';
+      var qrPending = $('fcProfileGateQr'); if (qrPending) qrPending.style.display = 'none';
+    } else if (accessRevoked) {
+      var notice = $('fcGateRevokedNotice'); if (notice) { notice.style.display = ''; notice.textContent = revocationMode === 'devices' ? 'Este dispositivo fue desvinculado. Escanea un nuevo QR de un dispositivo autorizado para volver a conectarlo.' : 'Tu acceso a la banda fue retirado. Elige tu función y solicita nuevamente la incorporación. No podrás ver canciones ni eventos hasta que el propietario te apruebe.'; }
+      var grid = gate.querySelector('.fc-profile-grid'); if (grid) grid.style.display = revocationMode === 'devices' ? 'none' : '';
+      var requestButton = $('fcGateRequestJoin'); if (requestButton) requestButton.style.display = revocationMode === 'devices' ? 'none' : '';
+      var qrButton = $('fcProfileGateQr'); if (qrButton) qrButton.style.display = revocationMode === 'devices' ? '' : 'none';
+      if (requestButton) requestButton.disabled = !selectedProfileRole || !!window.fcJoinRequestPending;
+    }
     firstProfileGateShown = true;
     gate.style.display = 'grid';
   }
@@ -1314,7 +1451,7 @@
         return;
       }
       var registration = await navigator.serviceWorker.getRegistration('./');
-      if (!registration) registration = await navigator.serviceWorker.register('./sw.js?v=16');
+      if (!registration) registration = await navigator.serviceWorker.register('./sw.js?v=17');
       var controllerChanged = new Promise(function (resolve) {
         var finished = false;
         var finish = function () {
@@ -1375,18 +1512,38 @@
     }
     if (!$('fcFirstProfileGate')) {
       var gate = document.createElement('div'); gate.id = 'fcFirstProfileGate'; gate.className = 'fc-profile-gate'; gate.style.display = 'none';
-      gate.innerHTML = '<div class="fc-profile-card"><div class="fc-profile-brand">♫</div><strong class="fc-profile-title">Frecuencia Cero</strong><p class="note">Primera configuración: selecciona quién utiliza este dispositivo. Se guardará para las próximas veces.</p><div class="fc-profile-grid"><button data-role="voice1"><b>🎤 Voz 1</b><small>Director musical</small></button><button data-role="voice2"><b>🎤 Voz 2</b><small>Cantante</small></button><button data-role="bass"><b>🎸 Bajista</b><small>Acordes</small></button><button data-role="accordionist"><b>🪗 Acordeonista</b><small>Acordeón / guitarra</small></button><button data-role="drummer"><b>🥁 Baterista</b><small>Seguimiento</small></button><button data-role="keyboardist"><b>🎹 Tecladista</b><small>Teclado / guitarra</small></button></div><p class="note fc-profile-foot">Si eres otra persona que se incorpora a la banda, elige tu función y solicita acceso. Si es otro teléfono o tablet de alguien ya autorizado, escanea el QR que genere uno de sus dispositivos.</p><div class="note">ID de este teléfono: <code id="fcGateUid">Preparando…</code> <button type="button" id="fcGateCopyUid">Copiar ID</button></div><button type="button" id="fcProfileGateQr">Ya tengo un QR para vincular</button></div>';
+      gate.innerHTML = '<div class="fc-profile-card"><div class="fc-profile-brand">♫</div><strong class="fc-profile-title">Frecuencia Cero</strong><p id="fcGateRevokedNotice" class="note" style="display:none;font-weight:800;color:#c45b38">Tu acceso a la banda fue retirado. Elige tu función y solicita nuevamente la incorporación. No podrás ver canciones ni eventos hasta que el propietario te apruebe.</p><p class="note">Selecciona quién utiliza este dispositivo.</p><div class="fc-profile-grid"><button data-role="voice1"><b>🎤 Voz 1</b><small>Director musical</small></button><button data-role="voice2"><b>🎤 Voz 2</b><small>Cantante</small></button><button data-role="bass"><b>🎸 Bajista</b><small>Acordes</small></button><button data-role="accordionist"><b>🪗 Acordeonista</b><small>Acordeón / guitarra</small></button><button data-role="drummer"><b>🥁 Baterista</b><small>Seguimiento</small></button><button data-role="keyboardist"><b>🎹 Tecladista</b><small>Teclado / guitarra</small></button></div><p id="fcGateStatus" class="note fc-profile-foot">Si eres un integrante nuevo, selecciona tu función y solicita acceso. Si es otro teléfono de un integrante ya autorizado, escanea su QR.</p><button type="button" id="fcGateRequestJoin" class="p" style="display:none">Solicitar reincorporación</button><div class="note">ID de este teléfono: <code id="fcGateUid">Preparando…</code> <button type="button" id="fcGateCopyUid">Copiar ID</button></div><button type="button" id="fcProfileGateQr">Ya tengo un QR para vincular</button></div>';
       document.body.appendChild(gate);
+      if (accessRevoked || accessVerificationPending) {
+        gate.style.display = 'grid'; firstProfileGateShown = true;
+        var initialNotice = $('fcGateRevokedNotice'); if (initialNotice) { initialNotice.style.display = ''; initialNotice.textContent = accessVerificationPending ? 'Verificando que este dispositivo siga autorizado. El catálogo permanecerá bloqueado hasta confirmar el acceso.' : (revocationMode === 'devices' ? 'Este dispositivo fue desvinculado. Escanea un nuevo QR de un dispositivo autorizado para volver a conectarlo.' : 'Tu acceso a la banda fue retirado. Selecciona tu función y solicita nuevamente la incorporación.'); }
+        var initialGrid = gate.querySelector('.fc-profile-grid'); if (initialGrid) initialGrid.style.display = accessVerificationPending || revocationMode === 'devices' ? 'none' : ''; 
+        var initialRequest = $('fcGateRequestJoin'); if (initialRequest) initialRequest.style.display = accessRevoked && revocationMode !== 'devices' ? '' : 'none';
+        var initialQr = $('fcProfileGateQr'); if (initialQr) initialQr.style.display = accessRevoked && revocationMode === 'devices' ? '' : 'none';
+      }
       Array.prototype.forEach.call(gate.querySelectorAll('[data-role]'), function (button) {
         button.onclick = function () {
           var role = button.dataset.role;
           selectedProfileRole = role; localStorage.setItem(PROFILE_KEY, role);
+          if (accessRevoked) {
+            var notice = $('fcGateStatus');
+            var requestButton = $('fcGateRequestJoin');
+            if (role === 'accordionist' && currentUser && currentUser.uid !== OWNER_UID) {
+              if (notice) notice.textContent = 'Acordeonista es la función reservada al propietario técnico. Selecciona otra función para solicitar reincorporación.';
+              if (requestButton) requestButton.style.display = 'none';
+            } else {
+              if (notice) notice.textContent = 'Perfil seleccionado: ' + roleName(role) + '. Pulsa Solicitar reincorporación; el catálogo se desbloqueará únicamente cuando el propietario te apruebe.';
+              if (requestButton) { requestButton.style.display = ''; requestButton.disabled = !!window.fcJoinRequestPending; requestButton.textContent = window.fcJoinRequestPending ? 'Solicitud pendiente' : 'Solicitar reincorporación'; }
+            }
+            updateSyncButtons(); return;
+          }
           hideFirstProfileGate(); updateSyncButtons();
           setStatus(role === 'accordionist' && currentUser && currentUser.uid !== OWNER_UID ? 'Perfil Acordeonista seleccionado. No escanees QR: copia el UID actual en Más → Mi banda y sincronización para ajustar la autorización inicial.' : 'Perfil guardado: ' + roleName(role) + '. Completa la incorporación en Más → Mi banda y sincronización.', role === 'accordionist' && currentUser && currentUser.uid !== OWNER_UID ? 'warning' : 'success');
           if (typeof window.show === 'function') window.show('vm');
         };
       });
       var gateQr = $('fcProfileGateQr'); if (gateQr) gateQr.onclick = function () { hideFirstProfileGate(); if (typeof window.show === 'function') window.show('vm'); setTimeout(function () { if ($('fcScanDeviceLink')) $('fcScanDeviceLink').click(); }, 250); };
+      var gateRequest = $('fcGateRequestJoin'); if (gateRequest) gateRequest.onclick = function () { if (!selectedProfileRole) { var status = $('fcGateStatus'); if (status) status.textContent = 'Primero selecciona tu función.'; return; } requestJoin(); };
       var gateCopy = $('fcGateCopyUid'); if (gateCopy) gateCopy.onclick = function () { var uid = currentUser && currentUser.uid || ''; if (!uid) return; if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(uid).then(function () { alert('ID copiado: ' + uid); }).catch(function () { alert('ID de este teléfono: ' + uid); }); else alert('ID de este teléfono: ' + uid); };
     }
     if (!$('fcMiniPlayer')) {
@@ -1469,16 +1626,23 @@
       '.fc-status{padding:9px 11px;border-radius:10px;font-size:13px;font-weight:700;background:var(--bg)}.fc-status.success{color:#16764b;background:rgba(22,139,88,.10)}.fc-status.warning{color:#946200;background:rgba(220,160,30,.13)}.fc-status.error{color:#b3261e;background:rgba(179,38,30,.10)}' +
       '.fc-field-label{font-size:12px;color:var(--mut);font-weight:800;margin-top:3px}.fc-auth-row,.fc-invite-row{display:flex;gap:7px}.fc-auth-row button,.fc-invite-row button{flex:1;min-width:0}.fc-band-box{border-top:1px solid var(--line);padding-top:10px;display:flex;flex-direction:column;gap:8px}.fc-member-admin{border-top:1px solid var(--line);padding-top:10px}.fc-member-head{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:8px}.fc-member-row{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line)}.fc-member-info{flex:1;min-width:0}.fc-member-info strong,.fc-member-info small{display:block;overflow-wrap:anywhere}.fc-member-info small{font-size:11px;color:var(--mut)}.fc-member-row select{width:47%;min-width:128px;padding:7px;font-size:12px}.fc-sync-panel code{font-size:10px;overflow-wrap:anywhere}.fc-sync-panel #fcProfileSelect{width:100%}.fc-sync-panel #fcCopyUid{font-size:11px;min-height:30px;padding:4px 8px}.fc-follow-row{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700}.fc-follow-row input{width:18px;min-height:18px;height:18px}.fc-live-banner{width:calc(100% - 24px);margin:0 12px 8px;text-align:left;background:rgba(22,139,88,.12);border-color:rgba(22,139,88,.35);color:var(--fg);font-size:13px;font-weight:850;display:flex;align-items:center;gap:8px}.fc-live-banner span:nth-child(2){flex:1}.fc-live-dot{width:9px;height:9px;border-radius:100%;background:#16a36a;display:inline-block}.fc-role-bar{padding:8px 12px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:var(--bg)}.fc-role-line{display:flex;align-items:center;justify-content:space-between;gap:7px;width:100%;font-size:12px}.fc-role-line button{font-size:12px;min-height:36px;padding:6px 9px}.fc-role-bar select{min-height:38px;font-size:13px}.fc-next-only{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px 18px;gap:12px;overflow:auto}.fc-next-chip{padding:6px 12px;border-radius:20px;background:var(--acc);color:var(--accfg);font-weight:900;font-size:12px}.fc-next-caption{font-size:11px;color:var(--mut);font-weight:900;letter-spacing:.12em}.fc-next-current{font-size:clamp(25px,6vw,38px);font-weight:900;line-height:1.1}.fc-next-title{font-size:clamp(28px,8vw,48px);font-weight:950;color:var(--acc);line-height:1.08}.fc-next-key{font-size:14px;color:var(--mut);font-weight:800}.fc-event-selected-row{display:block}.fc-event-song-head{display:flex;align-items:center;gap:7px}.fc-assignment-controls{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:7px 3px 2px 29px}.fc-assignment-controls label{font-size:10px;color:var(--mut);font-weight:800}.fc-assignment-controls select{display:block;min-height:35px;font-size:12px;padding:5px;margin-top:3px}.fc-live-song{background:rgba(22,139,88,.09);border-radius:10px;padding-left:8px;padding-right:8px}.fc-play-song{font-size:12px;padding:7px 9px;min-height:36px}' +
       '.fc-member-device{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 8px 8px 28px;font-size:11px;color:var(--mut)}.fc-member-device button{min-height:30px;padding:4px 8px;font-size:11px}.fc-pair-actions{border:1px solid var(--line);border-radius:13px;padding:12px;background:var(--bg);display:flex;flex-direction:column;gap:9px}.fc-pair-actions p{margin:0}.fc-pair-actions button{width:100%;min-height:44px}.fc-pair-box{border:1px solid var(--line);border-radius:13px;padding:12px;background:var(--bg);display:flex;flex-direction:column;gap:9px}.fc-pair-title{font-size:16px;font-weight:900}.fc-pair-qr{display:flex;justify-content:center;align-items:center;background:#fff;border-radius:10px;padding:12px;min-height:230px}.fc-pair-qr img{max-width:100%;height:auto}.fc-pair-url{font-size:10px;color:var(--mut);overflow-wrap:anywhere;user-select:text}.fc-pair-box button{width:100%}' +
-      '.fc-live-row-current{outline:1px solid color-mix(in srgb,var(--acc) 25%,transparent);outline-offset:3px;border-radius:7px}.fc-profile-gate{position:fixed;inset:0;z-index:2000;display:grid;place-items:center;padding:18px;background:rgba(7,14,25,.78);backdrop-filter:blur(7px)}.fc-profile-card{width:min(100%,480px);max-height:90dvh;overflow:auto;background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:22px;padding:20px;box-shadow:0 18px 60px rgba(0,0,0,.3);display:flex;flex-direction:column;gap:12px}.fc-profile-brand{width:48px;height:48px;border-radius:15px;display:grid;place-items:center;background:var(--acc);color:var(--accfg);font-size:28px}.fc-profile-title{font-size:24px}.fc-profile-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.fc-profile-grid button{min-height:76px;text-align:left;display:flex;flex-direction:column;gap:4px;padding:11px}.fc-profile-grid button b{font-size:14px}.fc-profile-grid button small{color:var(--mut);font-size:11px}.fc-profile-foot{margin:0}.fc-request-row{display:grid;grid-template-columns:minmax(0,1fr);gap:9px;align-items:stretch}.fc-request-info{min-width:0;width:100%}.fc-request-info strong{white-space:normal;overflow-wrap:normal;word-break:normal}.fc-request-info small{white-space:normal;overflow-wrap:anywhere;word-break:normal;line-height:1.35}.fc-request-actions{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:7px;align-items:center;min-width:0}.fc-request-actions select{width:100%;min-width:0;max-width:100%;font-size:12px;padding:7px}.fc-request-actions button{min-width:0;white-space:nowrap}.fc-request-reject{padding-left:10px;padding-right:10px}.fc-admin-member-row{min-width:0}.fc-admin-member-row .fc-member-info{min-width:0}.fc-admin-member-row .fc-member-info small{overflow-wrap:normal;word-break:normal;line-height:1.35}.fc-section-control{display:grid;grid-template-columns:minmax(0,1fr) minmax(145px, .9fr);align-items:center;gap:9px;padding:8px 4px 3px 29px}.fc-section-key{font-size:11px;color:var(--mut);font-weight:800}.fc-section-control label{display:flex;align-items:center;gap:7px;justify-content:flex-end;font-size:11px;color:var(--mut);font-weight:800}.fc-section-control select{width:100%;min-width:0;min-height:36px;font-size:12px;padding:5px}.fc-category-filters{display:flex;gap:7px;overflow-x:auto;padding:9px 12px 4px;scrollbar-width:none}.fc-category-filters::-webkit-scrollbar{display:none}.fc-category-filters button{flex:1 0 auto;min-height:35px;padding:6px 12px;border-radius:11px;font-size:12px;font-weight:850;white-space:nowrap;background:var(--bg);color:var(--mut);box-shadow:none}.fc-category-filters button.active{background:var(--acc);color:var(--accfg)}.fc-mini-player{position:fixed;left:10px;right:10px;bottom:calc(8px + env(safe-area-inset-bottom));z-index:1100;display:flex;flex-direction:column;gap:5px;padding:9px 11px 7px;border:1px solid color-mix(in srgb,var(--acc) 38%,var(--line));border-radius:14px;background:color-mix(in srgb,var(--card) 94%,transparent);color:var(--fg);box-shadow:0 8px 26px rgba(0,0,0,.18);backdrop-filter:blur(12px)}body.fc-reader-open .fc-mini-player{bottom:calc(98px + env(safe-area-inset-bottom))}.fc-mini-top{display:flex;align-items:center;gap:6px;font-size:10px;font-weight:900;letter-spacing:.06em;color:var(--mut);min-width:0}.fc-mini-live-dot{width:8px;height:8px;border-radius:50%;background:#18a66a;flex:0 0 auto}.fc-mini-player.is-paused .fc-mini-live-dot{background:#d49b2e}.fc-mini-event{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;font-weight:700;letter-spacing:0}.fc-mini-state{white-space:nowrap}.fc-mini-main{display:flex;align-items:center;gap:9px;min-width:0}.fc-mini-copy{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}.fc-mini-copy strong{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.fc-mini-copy span{font-size:11px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.fc-mini-main button{min-height:35px;padding:6px 9px;font-size:11px;font-weight:850;white-space:nowrap}.fc-mini-player.is-free{border-color:color-mix(in srgb,#d49b2e 55%,var(--line))}.fc-mini-progress-track{height:3px;background:var(--line);border-radius:99px;overflow:hidden}.fc-mini-progress-track span{height:100%;display:block;width:0;background:var(--acc);transition:width .2s}.fc-mini-progress-text{position:absolute;right:11px;top:8px;font-size:9px;color:var(--mut);display:none}.fc-sync-panel .fc-request-row{display:grid;grid-template-columns:minmax(0,1fr);}.fc-sync-panel .fc-request-actions{grid-template-columns:minmax(0,1fr) auto auto}#list{padding-bottom:100px}.event-list{padding-bottom:100px}@media(max-width:480px){.fc-sync-panel .fc-request-actions{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.fc-sync-panel .fc-request-actions select{grid-column:1/-1}.fc-sync-panel .fc-request-actions button{width:100%;min-height:39px}.fc-sync-panel .fc-admin-member-row{display:grid;grid-template-columns:minmax(0,1fr);gap:7px}.fc-sync-panel .fc-admin-member-row select{width:100%;min-width:0;max-width:100%}.fc-sync-panel .fc-admin-member-row button{width:100%}.fc-section-control{grid-template-columns:1fr;gap:5px;padding-left:29px}.fc-section-control label{justify-content:space-between}.fc-section-control select{max-width:100%}}';
+      '.fc-live-row-current{outline:1px solid color-mix(in srgb,var(--acc) 25%,transparent);outline-offset:3px;border-radius:7px}.fc-profile-gate{position:fixed;inset:0;z-index:2000;display:grid;place-items:center;padding:18px;background:var(--bg);backdrop-filter:none}.fc-profile-card{width:min(100%,480px);max-height:90dvh;overflow:auto;background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:22px;padding:20px;box-shadow:0 18px 60px rgba(0,0,0,.3);display:flex;flex-direction:column;gap:12px}.fc-profile-brand{width:48px;height:48px;border-radius:15px;display:grid;place-items:center;background:var(--acc);color:var(--accfg);font-size:28px}.fc-profile-title{font-size:24px}.fc-profile-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.fc-profile-grid button{min-height:76px;text-align:left;display:flex;flex-direction:column;gap:4px;padding:11px}.fc-profile-grid button b{font-size:14px}.fc-profile-grid button small{color:var(--mut);font-size:11px}.fc-profile-foot{margin:0}.fc-request-row{display:grid;grid-template-columns:minmax(0,1fr);gap:9px;align-items:stretch}.fc-request-info{min-width:0;width:100%}.fc-request-info strong{white-space:normal;overflow-wrap:normal;word-break:normal}.fc-request-info small{white-space:normal;overflow-wrap:anywhere;word-break:normal;line-height:1.35}.fc-request-actions{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:7px;align-items:center;min-width:0}.fc-request-actions select{width:100%;min-width:0;max-width:100%;font-size:12px;padding:7px}.fc-request-actions button{min-width:0;white-space:nowrap}.fc-request-reject{padding-left:10px;padding-right:10px}.fc-admin-member-row{min-width:0}.fc-admin-member-row .fc-member-info{min-width:0}.fc-admin-member-row .fc-member-info small{overflow-wrap:normal;word-break:normal;line-height:1.35}.fc-section-control{display:grid;grid-template-columns:minmax(0,1fr) minmax(145px, .9fr);align-items:center;gap:9px;padding:8px 4px 3px 29px}.fc-section-key{font-size:11px;color:var(--mut);font-weight:800}.fc-section-control label{display:flex;align-items:center;gap:7px;justify-content:flex-end;font-size:11px;color:var(--mut);font-weight:800}.fc-section-control select{width:100%;min-width:0;min-height:36px;font-size:12px;padding:5px}.fc-category-filters{display:flex;gap:7px;overflow-x:auto;padding:9px 12px 4px;scrollbar-width:none}.fc-category-filters::-webkit-scrollbar{display:none}.fc-category-filters button{flex:1 0 auto;min-height:35px;padding:6px 12px;border-radius:11px;font-size:12px;font-weight:850;white-space:nowrap;background:var(--bg);color:var(--mut);box-shadow:none}.fc-category-filters button.active{background:var(--acc);color:var(--accfg)}.fc-mini-player{position:fixed;left:10px;right:10px;bottom:calc(8px + env(safe-area-inset-bottom));z-index:1100;display:flex;flex-direction:column;gap:5px;padding:9px 11px 7px;border:1px solid color-mix(in srgb,var(--acc) 38%,var(--line));border-radius:14px;background:color-mix(in srgb,var(--card) 94%,transparent);color:var(--fg);box-shadow:0 8px 26px rgba(0,0,0,.18);backdrop-filter:blur(12px)}body.fc-reader-open .fc-mini-player{bottom:calc(98px + env(safe-area-inset-bottom))}.fc-mini-top{display:flex;align-items:center;gap:6px;font-size:10px;font-weight:900;letter-spacing:.06em;color:var(--mut);min-width:0}.fc-mini-live-dot{width:8px;height:8px;border-radius:50%;background:#18a66a;flex:0 0 auto}.fc-mini-player.is-paused .fc-mini-live-dot{background:#d49b2e}.fc-mini-event{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;font-weight:700;letter-spacing:0}.fc-mini-state{white-space:nowrap}.fc-mini-main{display:flex;align-items:center;gap:9px;min-width:0}.fc-mini-copy{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}.fc-mini-copy strong{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.fc-mini-copy span{font-size:11px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.fc-mini-main button{min-height:35px;padding:6px 9px;font-size:11px;font-weight:850;white-space:nowrap}.fc-mini-player.is-free{border-color:color-mix(in srgb,#d49b2e 55%,var(--line))}.fc-mini-progress-track{height:3px;background:var(--line);border-radius:99px;overflow:hidden}.fc-mini-progress-track span{height:100%;display:block;width:0;background:var(--acc);transition:width .2s}.fc-mini-progress-text{position:absolute;right:11px;top:8px;font-size:9px;color:var(--mut);display:none}.fc-sync-panel .fc-request-row{display:grid;grid-template-columns:minmax(0,1fr);}.fc-sync-panel .fc-request-actions{grid-template-columns:minmax(0,1fr) auto auto}#list{padding-bottom:100px}.event-list{padding-bottom:100px}@media(max-width:480px){.fc-sync-panel .fc-request-actions{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.fc-sync-panel .fc-request-actions select{grid-column:1/-1}.fc-sync-panel .fc-request-actions button{width:100%;min-height:39px}.fc-sync-panel .fc-admin-member-row{display:grid;grid-template-columns:minmax(0,1fr);gap:7px}.fc-sync-panel .fc-admin-member-row select{width:100%;min-width:0;max-width:100%}.fc-sync-panel .fc-admin-member-row button{width:100%}.fc-section-control{grid-template-columns:1fr;gap:5px;padding-left:29px}.fc-section-control label{justify-content:space-between}.fc-section-control select{max-width:100%}}';
     var style = document.createElement('style'); style.textContent = css; document.head.appendChild(style);
   }
+
+  window.addEventListener('storage', function (event) {
+    if (event.key === ACCESS_REVOKED_KEY && event.newValue === '1' && !accessRevoked) {
+      handleAccessRevoked('El acceso a esta banda fue revocado en otro dispositivo.');
+    }
+  });
 
   function startAutoConnect() {
     if (window.firebase) connectFirebase();
     else setStatus('Firebase no se ha cargado. Comprueba Internet y vuelve a abrir la página.', 'error');
     if ($('fcProfileSelect') && selectedProfileRole) $('fcProfileSelect').value = selectedProfileRole;
     if (currentUser) { setText('fcGateUid', currentUser.uid); setText('fcCurrentOwnerUid', currentUser.uid); }
-    if (selectedProfileRole) hideFirstProfileGate();
+    if (selectedProfileRole && !accessRevoked && !accessVerificationPending) hideFirstProfileGate();
+    if (accessRevoked || accessVerificationPending) { var revokedNotice = $('fcGateRevokedNotice'); if (revokedNotice) revokedNotice.style.display = ''; maybeShowFirstProfileGate(); }
     updateSyncButtons();
   }
 
@@ -1506,6 +1670,7 @@
   window.addEventListener('online', function () { if (currentUser && bandId && db) setStatus('Conexión recuperada. Sincronizando…', 'success'); renderMiniPlayer(); });
   window.addEventListener('offline', function () { if (currentUser && bandId) setStatus('Sin Internet. Se conserva la última información descargada; los cambios se sincronizarán al reconectar.', 'warning'); renderMiniPlayer(); });
   renderEvents(); renderLiveBanner(); startAutoConnect(); updateSyncButtons();
-  if (selectedProfileRole) hideFirstProfileGate();
+  if (selectedProfileRole && !accessRevoked && !accessVerificationPending) hideFirstProfileGate();
   else setTimeout(maybeShowFirstProfileGate, 1800);
+  if (accessRevoked || accessVerificationPending) { var rn = $('fcGateRevokedNotice'); if (rn) rn.style.display = ''; }
 })();

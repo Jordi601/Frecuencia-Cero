@@ -1,4 +1,4 @@
-const CACHE_NAME = 'frecuencia-cero-shell-v16-keyboard-blocks-presence-mobile-fix';
+const CACHE_NAME = 'frecuencia-cero-shell-v17-member-revocation-security';
 const APP_FILES = [
   './',
   './index.html',
