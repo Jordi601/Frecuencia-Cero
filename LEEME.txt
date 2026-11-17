@@ -1,1 +1,25 @@
-Frecuencia Cero V23. Publica primero RealtimeDB_Rules_V23.json en Firebase Realtime Database > Rules. Después sustituye los archivos del repositorio GitHub Pages con el contenido de este ZIP.
+FRECUENCIA CERO V24 — ACCESO CONTROLADO E INVITACIONES
+
+ANTES DE ACTUALIZAR
+1) En Firebase > Realtime Database > Data, comprueba que bands/frecuencia-cero-main/catalog y events ya contienen tus canciones y eventos. Haz una copia/ exportación de esos datos. Si están vacíos, NO actualices todavía: avisa para recuperar primero las canciones locales desde el iPhone propietario.
+2) Guarda una copia de las reglas actuales de Realtime Database.
+3) Publica las reglas V24 desde el paquete separado Reglas_Firebase_V24_para_publicar.zip.
+4) Sube todos los archivos del ZIP de aplicación a la raíz del repositorio GitHub Pages y confirma en main.
+5) En iPhone y laptop autorizados, abre Más > Buscar actualizaciones. No borres los datos de Safari ni la PWA.
+
+ACCESO E INVITACIONES
+- URL pública: muestra la puerta de selección de perfil, pero no permite entrar al catálogo ni enviar una solicitud sin enlace de invitación.
+- Enlace general: se genera desde Más > Mi banda y sincronización > Invitar integrantes por enlace. El invitado selecciona su función y pulsa Solicitar acceso. El propietario debe aprobarlo. Es reutilizable.
+- Enlace con función: el propietario preasigna Voz 1, Voz 2, Bajista, Baterista o Tecladista. El invitado ve la función ya seleccionada, pulsa Solicitar acceso y espera aprobación. El token es de un solo uso y vence en 7 días.
+- QR: se mantiene para vincular otro dispositivo al perfil de un integrante que ya está autorizado; no crea un integrante nuevo.
+- Elegir un perfil o abrir un enlace NO concede acceso por sí solo. La membresía activa en Firebase es la única autorización para leer catálogo, letras y eventos.
+
+SEGURIDAD Y DATOS
+- El catálogo y la lista estática de canciones se retiraron del HTML público actual. Las canciones y eventos se leen desde Realtime Database después de validar la membresía.
+- UID propietario: qZCvhHTK3MUhcABIlZlRyrqHKdC2. ID de banda: frecuencia-cero-main.
+- En el primer acceso del propietario, si Firebase está vacío y el dispositivo conserva una copia local antigua, V24 ofrece importarla. No reemplaza datos existentes.
+- No borres el almacenamiento de Safari/PWA de los dispositivos ya vinculados.
+- Si el repositorio GitHub es público, las versiones anteriores todavía pueden aparecer en su historial de commits. Esta actualización limpia el HTML actual, pero no borra automáticamente el historial.
+
+PRUEBA RECOMENDADA
+Después de publicar, abre la URL pública en una ventana privada. Debe mostrar selección de perfil, y sin un enlace válido no debe permitir solicitar ni consultar canciones. Luego prueba el enlace general, la solicitud y la aprobación desde el iPhone propietario.

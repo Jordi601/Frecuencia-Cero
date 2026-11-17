@@ -4,7 +4,7 @@
 (function () {
   'use strict';
 
-  var APP_VERSION = 'V23';
+  var APP_VERSION = 'V24';
   var CFG_KEY = 'fc_firebase_config_v1';
   var BAND_KEY = 'fc_band_id_v1';
   var PROFILE_KEY = 'fc_device_profile_v1';
@@ -102,6 +102,11 @@
   var lastPublishedPositionKey = '';
   var scrollPublishTimer = null;
   var firstProfileGateShown = false;
+  var incomingMemberInviteToken = '';
+  var incomingMemberInvite = null;
+  var memberInviteCheckStarted = false;
+  var genericJoinLink = false;
+  var ownerLocalMigrationPrompted = false;
 
   function $(id) { return document.getElementById(id); }
   function safeJson(value) { try { return JSON.stringify(value); } catch (e) { return '{}'; } }
@@ -124,9 +129,12 @@
     var memberUid = memberProfile && (memberProfile.memberUid || currentUser.uid);
     return currentUser.uid === OWNER_UID || !!(memberProfile && memberProfile.isOwner) || !!(ownerUid && (currentUser.uid === ownerUid || memberUid === ownerUid)) || memberUid === OWNER_UID;
   }
-  function canManageCatalog() { return !isConnected() || isTechnicalOwner(); }
-  function canManageEvents() { return !isConnected() || isTechnicalOwner() || memberRole === 'voice1'; }
+  function canManageCatalog() { return isConnected() && isTechnicalOwner(); }
+  function canManageEvents() { return isConnected() && (isTechnicalOwner() || memberRole === 'voice1'); }
   function roleName(role) { return ROLE_LABELS[role] || 'Integrante'; }
+  function hasValidJoinEntryPoint() {
+    return !!(genericJoinLink || incomingMemberInviteToken || (accessRevoked && revocationMode !== 'devices'));
+  }
   function randomCode() {
     var chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     var out = '';
@@ -213,16 +221,17 @@
     if ($('fcMemberAdmin')) $('fcMemberAdmin').style.display = connected && isTechnicalOwner() ? '' : 'none';
     if ($('fcMyDevicesBox')) $('fcMyDevicesBox').style.display = connected ? '' : 'none';
     if ($('fcJoinRequests')) $('fcJoinRequests').style.display = connected && isTechnicalOwner() ? '' : 'none';
+    if ($('fcMemberInvitePanel')) $('fcMemberInvitePanel').style.display = connected && isTechnicalOwner() ? '' : 'none';
     if ($('fcFollow')) $('fcFollow').checked = followDirector;
     var profileBar = $('fcRoleBar');
     if (profileBar) profileBar.style.display = (connected && memberRole !== 'pending') ? '' : 'none';
     if ($('fcDirectorButton')) $('fcDirectorButton').style.display = memberRole === 'voice1' ? '' : 'none';
     if ($('fcProfileSelect') && connected) $('fcProfileSelect').style.display = 'none';
-    if ($('eventNew')) $('eventNew').style.display = connected && !canManageEvents() ? 'none' : '';
+    if ($('eventNew')) $('eventNew').style.display = connected && canManageEvents() ? '' : 'none';
     var legacyImport = document.querySelector('.event-import'); if (legacyImport) legacyImport.style.display = connected ? 'none' : '';
-    if ($('playlistEdit')) $('playlistEdit').style.display = connected && !canManageEvents() ? 'none' : '';
-    if ($('bnew')) $('bnew').style.display = connected && !canManageCatalog() ? 'none' : '';
-    if ($('bedit')) $('bedit').style.display = connected && !canManageCatalog() ? 'none' : '';
+    if ($('playlistEdit')) $('playlistEdit').style.display = connected && canManageEvents() ? '' : 'none';
+    if ($('bnew')) $('bnew').style.display = connected && canManageCatalog() ? '' : 'none';
+    if ($('bedit')) $('bedit').style.display = connected && canManageCatalog() ? '' : 'none';
     if ($('tmode') && connected) $('tmode').style.display = 'none';
     renderMemberAdmin();
     renderMyDevices();
@@ -287,6 +296,16 @@
   function onAuthChanged(user) {
     currentUser = user || null;
     anonymousSignInPending = false;
+    if (user && user.uid !== OWNER_UID && !accessRevoked) {
+      // Cada navegador no reconocido vuelve a elegir perfil; una membresía ya aprobada
+      // volverá a cargar su función desde Firebase después de verificar el UID.
+      var hasAssignedInviteInUrl = false;
+      try { hasAssignedInviteInUrl = new URL(window.location.href).searchParams.has('fc_member_invite'); } catch (e) {}
+      if (!hasAssignedInviteInUrl) {
+        selectedProfileRole = '';
+        try { localStorage.removeItem(PROFILE_KEY); } catch (e) {}
+      }
+    }
     if (!user) {
       memberRole = 'unjoined'; memberProfile = null;
       setStatus('Identificando este teléfono…', 'neutral');
@@ -304,9 +323,9 @@
     setStatus(user.uid === OWNER_UID ? 'Dispositivo propietario identificado. Aquí podrás crear la banda y generar los códigos QR.' : 'Teléfono identificado. Selecciona tu perfil o escanea el QR de un dispositivo autorizado.', 'success');
     setText('fcDeviceUid', user.uid);
     setText('fcGateUid', user.uid);
-    if (selectedProfileRole) hideFirstProfileGate();
     watchOwnMembership();
     maybeProcessIncomingPair();
+    maybeProcessIncomingMemberInvite();
     updateSyncButtons();
   }
   function activateMembership(profile, kind) {
@@ -357,13 +376,15 @@
       var req = snap.val();
       window.fcJoinRequestPending = !!req;
       if (req) {
+        if (req.requestedRole) { selectedProfileRole = req.requestedRole; localStorage.setItem(PROFILE_KEY, req.requestedRole); }
         setStatus('Solicitud enviada como ' + roleName(req.requestedRole) + '. Esperando aprobación del propietario técnico.', 'warning');
-        if (accessRevoked && req.requestedRole) { selectedProfileRole = req.requestedRole; localStorage.setItem(PROFILE_KEY, req.requestedRole); }
       } else if (!bandId && currentUser && !memberProfile) setStatus('Selecciona tu perfil o escanea un QR de vinculación.', 'neutral');
-      if (accessRevoked) {
-        var gateStatus = $('fcGateStatus'); var gateRequest = $('fcGateRequestJoin');
-        if (req) { if (gateStatus) gateStatus.textContent = 'Solicitud enviada como ' + roleName(req.requestedRole) + '. Esperando aprobación del propietario.'; if (gateRequest) { gateRequest.disabled = true; gateRequest.textContent = 'Solicitud pendiente'; } }
-        else if (gateRequest) { gateRequest.disabled = !selectedProfileRole; gateRequest.textContent = 'Solicitar reincorporación'; }
+      var gateStatus = $('fcGateStatus'); var gateRequest = $('fcGateRequestJoin');
+      if (req) {
+        if (gateStatus) gateStatus.textContent = 'Tu solicitud como ' + roleName(req.requestedRole) + ' está pendiente de aprobación. El catálogo permanece bloqueado.';
+        if (gateRequest) { gateRequest.style.display = ''; gateRequest.disabled = true; gateRequest.textContent = 'Solicitud pendiente'; }
+      } else if (accessRevoked) {
+        if (gateRequest) { gateRequest.disabled = !selectedProfileRole; gateRequest.textContent = 'Solicitar reincorporación'; }
       }
       updateSyncButtons();
     }, function (err) {
@@ -378,6 +399,23 @@
     }
     memberRole = window.fcJoinRequestPending ? 'pending' : 'unjoined';
     identityKind = 'members';
+    // Una visita nueva debe elegir su función en esta sesión; no reutilizar una selección local antigua.
+    // Se conserva únicamente si ya existe una solicitud o si la URL trae un enlace con función asignada.
+    var hasPreassignedInvite = false;
+    try { hasPreassignedInvite = new URL(window.location.href).searchParams.has('fc_member_invite'); } catch (e) {}
+    if (!window.fcJoinRequestPending && !hasPreassignedInvite) {
+      selectedProfileRole = '';
+      try { localStorage.removeItem(PROFILE_KEY); } catch (e) {}
+    }
+    if (currentUser && currentUser.uid !== OWNER_UID) {
+      try {
+        localStorage.removeItem('fc_v24_legacy_songs_backup'); localStorage.removeItem('fc_v24_legacy_events_backup');
+        localStorage.removeItem(window.KEY || 'letras_frecuencia_cero_v3'); localStorage.removeItem(window.EVENT_KEY || 'frecuencia_cero_eventos_v1');
+        localStorage.removeItem('letras_v1'); localStorage.removeItem('letras_fc_v2');
+      } catch (e) {}
+      window.songs = []; window.events = [];
+      if (typeof window.render === 'function') window.render(); if (typeof window.renderEvents === 'function') window.renderEvents();
+    }
     updateSyncButtons();
     maybeShowFirstProfileGate();
   }
@@ -425,20 +463,29 @@
     try {
       if (!currentUser || !db) throw new Error('Espera a que Firebase identifique este teléfono.');
       if (accessRevoked && revocationMode === 'devices') throw new Error('Este perfil sigue perteneciendo a la banda. Escanea un nuevo QR desde un dispositivo autorizado para volver a vincular este teléfono.');
+      if (!hasValidJoinEntryPoint()) throw new Error('Para solicitar acceso necesitas abrir el enlace de invitación que te envió el propietario. La dirección pública por sí sola no concede acceso.');
       var role = selectedProfileRole || ($('fcProfileSelect') && $('fcProfileSelect').value);
       if (!role || role === 'accordionist' || !ROLE_OPTIONS.some(function (r) { return r[0] === role; })) throw new Error('La función Acordeonista está reservada al propietario técnico. Selecciona otra función disponible.');
       if (bandId) throw new Error('Este teléfono ya pertenece a la banda.');
+      if (incomingMemberInviteToken && incomingMemberInvite && incomingMemberInvite.role !== role) throw new Error('Esta invitación está reservada para ' + roleName(incomingMemberInvite.role) + '.');
       var reqRef = db.ref('bands/' + FIXED_BAND_ID + '/joinRequests/' + currentUser.uid);
       var existing = await reqRef.once('value');
-      if (existing.exists()) { window.fcJoinRequestPending = true; setStatus('Ya existe una solicitud pendiente. El propietario técnico debe aprobarla.', 'warning'); updateSyncButtons(); return; }
-      await reqRef.set({ requestedRole: role, deviceName: ROLE_LABELS[role], requestedAt: firebase.database.ServerValue.TIMESTAMP, status: 'pending' });
+      if (existing.exists()) { window.fcJoinRequestPending = true; var existingStatus = $('fcGateStatus'); if (existingStatus) existingStatus.textContent = 'Ya existe una solicitud pendiente. El repertorio se abrirá cuando el propietario la apruebe.'; var existingButton = $('fcGateRequestJoin'); if (existingButton) { existingButton.disabled = true; existingButton.textContent = 'Solicitud pendiente'; } updateSyncButtons(); return; }
+      var requestData = { requestedRole: role, deviceName: ROLE_LABELS[role], requestedAt: firebase.database.ServerValue.TIMESTAMP, status: 'pending' };
+      if (incomingMemberInviteToken) {
+        var claimedInvite = await claimMemberInvite(incomingMemberInviteToken, role);
+        requestData.inviteToken = incomingMemberInviteToken;
+        requestData.invitedBy = claimedInvite.createdBy || '';
+        requestData.inviteMode = 'preassigned-role';
+      }
+      await reqRef.set(requestData);
       selectedProfileRole = role; localStorage.setItem(PROFILE_KEY, role);
       window.fcJoinRequestPending = true;
-      setStatus('Solicitud enviada. El propietario técnico aprobará tu función desde Mi banda y sincronización.', 'success');
-      if (accessRevoked) {
-        var gateStatus = $('fcGateStatus'); if (gateStatus) gateStatus.textContent = 'Solicitud enviada. El propietario debe aprobarla para recuperar el acceso al catálogo y los eventos.';
-        var gateRequest = $('fcGateRequestJoin'); if (gateRequest) { gateRequest.disabled = true; gateRequest.textContent = 'Solicitud pendiente'; }
-      }
+      if (incomingMemberInviteToken) clearMemberInviteFromUrl();
+      incomingMemberInviteToken = ''; incomingMemberInvite = null;
+      var gateStatusAfter = $('fcGateStatus'); if (gateStatusAfter) gateStatusAfter.textContent = 'Solicitud enviada como ' + roleName(role) + '. El propietario debe aprobarla. Hasta entonces el catálogo y los eventos seguirán bloqueados.';
+      var gateRequestAfter = $('fcGateRequestJoin'); if (gateRequestAfter) { gateRequestAfter.style.display = ''; gateRequestAfter.disabled = true; gateRequestAfter.textContent = 'Solicitud pendiente'; }
+      setStatus('Solicitud enviada como ' + roleName(role) + '. Esperando aprobación del propietario.', 'success');
       updateSyncButtons();
     } catch (err) {
       var msg = err && err.code === 'PERMISSION_DENIED' ? 'No se pudo enviar la solicitud. Primero el propietario técnico debe crear la banda y publicar las reglas correctas.' : (err.message || 'Error desconocido.');
@@ -457,16 +504,193 @@
     patch['members/' + uid] = member;
     patch['joinRequests/' + uid] = null;
     try {
+      if (req.inviteToken && role !== req.requestedRole) throw new Error('Esta invitación tiene la función preasignada de ' + roleName(req.requestedRole) + '. Aprueba con esa misma función.');
       await db.ref(memberPath() + '/' + uid).set(member);
       await db.ref(bandPath('joinRequests/' + uid)).remove();
+      if (req.inviteToken) await db.ref(bandPath('memberInvites/' + req.inviteToken)).update({ status: 'completed', completedAt: firebase.database.ServerValue.TIMESTAMP, completedBy: currentUser.uid }).catch(function () {});
       setStatus((req.deviceName || 'Integrante') + ' aprobado como ' + roleName(role) + '.', 'success');
     } catch (err) { setStatus('No se pudo aprobar al integrante: ' + err.message, 'error'); }
   }
   async function rejectJoinRequest(uid) {
     if (!isTechnicalOwner() || !db || !bandId) return;
-    try { await db.ref(bandPath('joinRequests/' + uid)).remove(); }
-    catch (err) { setStatus('No se pudo rechazar la solicitud: ' + err.message, 'error'); }
+    try {
+      var req = joinRequestList[uid] || {};
+      await db.ref(bandPath('joinRequests/' + uid)).remove();
+      if (req.inviteToken) await db.ref(bandPath('memberInvites/' + req.inviteToken)).remove().catch(function () {});
+      setStatus('Solicitud rechazada.', 'success');
+    } catch (err) { setStatus('No se pudo rechazar la solicitud: ' + err.message, 'error'); }
   }
+  function clearMemberInviteFromUrl() {
+    try {
+      var url = new URL(window.location.href);
+      url.searchParams.delete('fc_member_invite');
+      url.searchParams.delete('fc_join');
+      history.replaceState({}, '', url.pathname + url.search + url.hash);
+    } catch (e) {}
+  }
+  function memberInvitePath(token) { return 'bands/' + FIXED_BAND_ID + '/memberInvites/' + String(token || '').toLowerCase(); }
+  function showMemberInviteResult(text, isError) {
+    var node = $('fcMemberInviteResult');
+    if (node) { node.textContent = text; node.className = 'note ' + (isError ? 'error' : 'success'); }
+  }
+  async function createMemberInviteLink() {
+    try {
+      if (!isConnected() || !isTechnicalOwner() || !db) throw new Error('Solo el propietario técnico puede crear invitaciones.');
+      var role = $('fcMemberInviteRole') ? $('fcMemberInviteRole').value : 'choose';
+      var url = new URL('./', window.location.href); url.search = ''; url.hash = '';
+      if (role === 'choose') {
+        url.searchParams.set('fc_join', '1');
+      } else {
+        if (!ROLE_OPTIONS.some(function (r) { return r[0] === role && role !== 'accordionist' && role !== 'pending'; })) throw new Error('Selecciona una función válida.');
+        var occupied = Object.keys(memberList || {}).some(function (uid) { return memberList[uid] && memberList[uid].role === role; });
+        var requested = Object.keys(joinRequestList || {}).some(function (uid) { return joinRequestList[uid] && joinRequestList[uid].requestedRole === role; });
+        if (occupied || requested) throw new Error('La función ' + roleName(role) + ' ya está ocupada o tiene una solicitud pendiente.');
+        await waitForServerClock();
+        var token = randomTokenHex();
+        var record = { role: role, status: 'pending', mode: 'member-request', createdBy: currentUser.uid, createdAt: firebase.database.ServerValue.TIMESTAMP, expiresAt: serverNow() + 7 * 24 * 60 * 60 * 1000 };
+        await db.ref(memberInvitePath(token)).set(record);
+        url.searchParams.set('fc_member_invite', token);
+      }
+      var link = url.toString();
+      var field = $('fcMemberInviteUrl');
+      if (field) { field.value = link; field.style.display = ''; field.focus(); field.select(); }
+      var copy = $('fcCopyMemberInvite'); if (copy) { copy.style.display = ''; copy.onclick = function () {
+        if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(link).then(function () { showMemberInviteResult('Enlace copiado. Envíalo por WhatsApp o mensaje.', false); }).catch(function () { if (field) { field.focus(); field.select(); } showMemberInviteResult('Selecciona el enlace y cópialo manualmente.', false); });
+        else { if (field) { field.focus(); field.select(); } showMemberInviteResult('Selecciona el enlace y cópialo manualmente.', false); }
+      }; }
+      showMemberInviteResult(role === 'choose' ? 'Enlace general listo. La persona elegirá su función y enviará una solicitud. Tú tendrás que aprobarla.' : 'Enlace para ' + roleName(role) + ' listo. La función llegará preseleccionada. La persona deberá solicitar acceso y tú tendrás que aprobarlo. Vence en 7 días y se reclama una sola vez.', false);
+    } catch (err) { showMemberInviteResult('No se pudo crear el enlace: ' + (err.message || err), true); }
+  }
+  async function maybeProcessIncomingMemberInvite() {
+    if (!currentUser || !db || memberInviteCheckStarted) return;
+    var token = '';
+    try {
+      var query = new URL(window.location.href).searchParams;
+      token = query.get('fc_member_invite') || '';
+      genericJoinLink = query.get('fc_join') === '1';
+    } catch (e) {}
+    if (!token) {
+      // La puerta se muestra después de que watchOwnMembership confirme que este UID no tiene acceso.
+      return;
+    }
+    if (!/^[a-f0-9]{48}$/i.test(token)) {
+      maybeShowFirstProfileGate();
+      var invalidStatus = $('fcGateStatus'); if (invalidStatus) invalidStatus.textContent = 'El enlace de invitación no contiene un código válido. Pide al propietario que genere otro.';
+      return;
+    }
+    memberInviteCheckStarted = true;
+    selectedProfileRole = '';
+    try { localStorage.removeItem(PROFILE_KEY); } catch (e) {}
+    try {
+      // No convertir un dispositivo ya autorizado en otro perfil por abrir un enlace.
+      var own = await Promise.all([
+        db.ref('bands/' + FIXED_BAND_ID + '/members/' + currentUser.uid).once('value'),
+        db.ref('bands/' + FIXED_BAND_ID + '/devices/' + currentUser.uid).once('value')
+      ]);
+      if ((own[0].val() && own[0].val().role) || (own[1].val() && own[1].val().role)) {
+        setStatus('Este dispositivo ya está vinculado. La invitación debe abrirse en otro navegador o dispositivo.', 'warning');
+        return;
+      }
+      await waitForServerClock();
+      var snap = await db.ref(memberInvitePath(token)).once('value');
+      var invite = snap.val();
+      if (!invite || invite.mode !== 'member-request') throw new Error('La invitación no existe o fue cancelada. Pide al propietario un enlace nuevo.');
+      if (invite.status !== 'pending') throw new Error(invite.status === 'claimed' ? 'Esta invitación ya fue utilizada para enviar una solicitud.' : 'Esta invitación ya no está disponible.');
+      if (!Number(invite.expiresAt) || Number(invite.expiresAt) <= serverNow()) throw new Error('La invitación venció. Pide un enlace nuevo al propietario.');
+      if (!ROLE_OPTIONS.some(function (r) { return r[0] === invite.role && invite.role !== 'accordionist' && invite.role !== 'pending'; })) throw new Error('La invitación contiene una función no válida.');
+      incomingMemberInviteToken = token.toLowerCase(); incomingMemberInvite = invite;
+      selectedProfileRole = invite.role; localStorage.setItem(PROFILE_KEY, invite.role);
+      maybeShowFirstProfileGate();
+      var gate = $('fcFirstProfileGate');
+      if (gate) {
+        var grid = gate.querySelector('.fc-profile-grid'); if (grid) grid.style.display = 'none';
+        var status = $('fcGateStatus'); if (status) status.textContent = 'Te invitaron como ' + roleName(invite.role) + '. Pulsa Solicitar acceso. El repertorio seguirá bloqueado hasta que el propietario apruebe tu solicitud.';
+        var request = $('fcGateRequestJoin'); if (request) { request.style.display = ''; request.disabled = false; request.textContent = 'Solicitar acceso como ' + roleName(invite.role); }
+        var intro = $('fcGateIntro'); if (intro) intro.textContent = 'Invitación con función preasignada';
+        gate.style.display = 'grid'; firstProfileGateShown = true;
+      }
+    } catch (err) {
+      genericJoinLink = false;
+      maybeShowFirstProfileGate();
+      var statusNode = $('fcGateStatus'); if (statusNode) statusNode.textContent = err.message || 'No se pudo verificar la invitación.';
+      var gridNode = document.querySelector('#fcFirstProfileGate .fc-profile-grid'); if (gridNode) gridNode.style.display = '';
+      var requestNode = $('fcGateRequestJoin'); if (requestNode) requestNode.style.display = 'none';
+    }
+  }
+  async function claimMemberInvite(token, role) {
+    await waitForServerClock();
+    var ref = db.ref(memberInvitePath(token));
+    var first = (await ref.once('value')).val();
+    if (!first || first.mode !== 'member-request') throw new Error('La invitación ya no existe. Pide un enlace nuevo.');
+    if (first.role !== role) throw new Error('La invitación está reservada para ' + roleName(first.role) + '.');
+    if (first.status === 'claimed' && first.claimedBy === currentUser.uid) return first;
+    if (first.status !== 'pending') throw new Error('La invitación ya fue utilizada o cancelada.');
+    if (Number(first.expiresAt) <= serverNow()) throw new Error('La invitación venció. Pide un enlace nuevo.');
+    var fallback = true;
+    var tx = await ref.transaction(function (current) {
+      if (current == null && fallback) { current = Object.assign({}, first); fallback = false; }
+      if (!current || current.status !== 'pending' || Number(current.expiresAt) <= serverNow() || current.role !== role) return;
+      var next = Object.assign({}, current);
+      next.status = 'claimed'; next.claimedBy = currentUser.uid; next.requestedRole = role; next.claimedAt = firebase.database.ServerValue.TIMESTAMP;
+      return next;
+    }, undefined, false);
+    if (tx.committed) return tx.snapshot.val();
+    var last = (await ref.once('value')).val();
+    if (last && last.status === 'claimed' && last.claimedBy === currentUser.uid && last.role === role) return last;
+    if (!last) throw new Error('La invitación fue eliminada. Pide un enlace nuevo.');
+    if (Number(last.expiresAt) <= serverNow()) throw new Error('La invitación venció. Pide un enlace nuevo.');
+    throw new Error('La invitación ya fue usada por otro dispositivo o Firebase no pudo reclamarla.');
+  }
+
+  function readStoredArray(key, fallbackKeys) {
+    var keys = [key].concat(fallbackKeys || []);
+    for (var i = 0; i < keys.length; i++) {
+      try {
+        var raw = localStorage.getItem(keys[i]);
+        if (!raw) continue;
+        var parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length) return parsed;
+      } catch (e) {}
+    }
+    return [];
+  }
+  function maybeOfferOwnerLocalMigration() {
+    if (ownerLocalMigrationPrompted || !isTechnicalOwner() || !db || !bandId) return;
+    var legacySongs = readStoredArray('fc_v24_legacy_songs_backup', [window.KEY || 'letras_frecuencia_cero_v3', 'letras_v1', 'letras_fc_v2']);
+    var legacyEvents = readStoredArray('fc_v24_legacy_events_backup', [window.EVENT_KEY || 'frecuencia_cero_eventos_v1']);
+    if (!legacySongs.length && !legacyEvents.length) { ownerLocalMigrationPrompted = true; return; }
+    ownerLocalMigrationPrompted = true;
+    Promise.all([
+      db.ref(bandPath('catalog')).once('value'),
+      db.ref(bandPath('events')).once('value')
+    ]).then(function (snaps) {
+      var remoteSongs = snaps[0].val() || {};
+      var remoteEvents = snaps[1].val() || {};
+      var importSongs = !Object.keys(remoteSongs).length && legacySongs.length > 0;
+      var importEvents = !Object.keys(remoteEvents).length && legacyEvents.length > 0;
+      if (!importSongs && !importEvents) return;
+      var prompt = 'Encontré un respaldo local de este dispositivo propietario que no aparece todavía en Firebase.\n\n' +
+        (importSongs ? legacySongs.length + ' canciones\n' : '') +
+        (importEvents ? legacyEvents.length + ' eventos\n' : '') +
+        '\n¿Deseas importarlo a la banda? No se reemplazará ningún dato que ya exista en Firebase.';
+      if (!confirm(prompt)) {
+        setStatus('Se conservó el respaldo local sin publicarlo. El catálogo compartido seguirá cargándose desde Firebase.', 'warning');
+        return;
+      }
+      var jobs = [];
+      if (importSongs) jobs.push(db.ref(bandPath('catalog')).set(mapById(legacySongs)));
+      if (importEvents) jobs.push(db.ref(bandPath('events')).set(mapById(legacyEvents)));
+      return Promise.all(jobs).then(function () {
+        localStorage.removeItem('fc_v24_legacy_songs_backup');
+        localStorage.removeItem('fc_v24_legacy_events_backup');
+        setStatus('Respaldo local importado a Firebase correctamente.', 'success');
+      });
+    }).catch(function (err) {
+      ownerLocalMigrationPrompted = false;
+      setStatus('No se pudo revisar el respaldo local: ' + (err.message || err), 'warning');
+    });
+  }
+
   async function attachBand(id, kind) {
     if (!db || !currentUser) return;
     kind = kind || 'members';
@@ -518,6 +742,11 @@
     refs.catalog.on('value', function (snap) {
       if (accessRevoked || accessVerificationPending) return;
       var data = snap.val() || {};
+      if (!Object.keys(data).length && isTechnicalOwner()) {
+        var hasLegacySongs = readStoredArray('fc_v24_legacy_songs_backup', [window.KEY || 'letras_frecuencia_cero_v3', 'letras_v1', 'letras_fc_v2']).length > 0;
+        if (hasLegacySongs) { maybeOfferOwnerLocalMigration(); window.songs = []; if (typeof window.render === 'function') window.render(); return; }
+      }
+      if (Object.keys(data).length && isTechnicalOwner()) { localStorage.removeItem('fc_v24_legacy_songs_backup'); }
       applyingRemote = true;
       window.songs = objectValues(data).map(function (song) {
         if (song.section !== 'keyboard' && song.section !== 'accordion') song.section = 'accordion';
@@ -532,6 +761,11 @@
     refs.events.on('value', function (snap) {
       if (accessRevoked || accessVerificationPending) return;
       var data = snap.val() || {};
+      if (!Object.keys(data).length && isTechnicalOwner()) {
+        var hasLegacyEvents = readStoredArray('fc_v24_legacy_events_backup', [window.EVENT_KEY || 'frecuencia_cero_eventos_v1']).length > 0;
+        if (hasLegacyEvents) { maybeOfferOwnerLocalMigration(); window.events = []; if (typeof window.renderEvents === 'function') window.renderEvents(); return; }
+      }
+      if (Object.keys(data).length && isTechnicalOwner()) { localStorage.removeItem('fc_v24_legacy_events_backup'); }
       applyingRemote = true;
       window.events = objectValues(data).sort(function (a, b) { return (a.createdAt || 0) - (b.createdAt || 0); });
       lastEventsJson = safeJson(mapById(window.events));
@@ -1392,7 +1626,7 @@
   // o desde uno de sus dispositivos QR vinculados. Las reglas Firebase deben
   // autorizar explícitamente esos dispositivos en /catalog.
   window.save = function () {
-    if (accessRevoked || accessVerificationPending) return;
+    if (!isConnected() || accessRevoked || accessVerificationPending) { maybeShowFirstProfileGate(); setStatus('El catálogo solo está disponible para integrantes aprobados.', 'warning'); return; }
     if (typeof originalSave === 'function') originalSave();
     if (applyingRemote || !db || !bandId) return;
     if (!isTechnicalOwner()) {
@@ -1424,10 +1658,10 @@
     });
   };
   window.saveEvents = function () {
-    if (accessRevoked || accessVerificationPending) return Promise.reject(new Error('Este dispositivo no tiene autorización para guardar eventos.'));
+    if (!isConnected() || accessRevoked || accessVerificationPending) return Promise.reject(new Error('Este dispositivo no tiene autorización para guardar eventos.'));
     if (typeof originalSaveEvents === 'function') originalSaveEvents();
     if (applyingRemote) return Promise.resolve(true);
-    if (!db || !bandId) return Promise.resolve(true); // modo local cuando no hay banda conectada
+    if (!db || !bandId) return Promise.reject(new Error('No hay una banda autorizada conectada a Firebase.'));
     if (!(isTechnicalOwner() || memberRole === 'voice1')) {
       var denied = new Error('Este perfil no tiene permiso para crear o modificar eventos.');
       setStatus(denied.message, 'warning');
@@ -1449,7 +1683,7 @@
     }).catch(function (err) {
       if (eventsWriteQueuedJson === serialized) eventsWriteQueuedJson = '';
       var detail = err && err.code === 'PERMISSION_DENIED'
-        ? 'Firebase rechazó el guardado. Publica las reglas V23 de Realtime Database para permitir al dispositivo vinculado al propietario guardar eventos.'
+        ? 'Firebase rechazó el guardado. Publica las reglas V24 de Realtime Database para permitir al dispositivo vinculado al propietario guardar eventos.'
         : 'No se pudo sincronizar el evento: ' + (err && err.message ? err.message : 'error de conexión.');
       setStatus(detail, 'error');
       throw new Error(detail);
@@ -1457,7 +1691,7 @@
     return eventsWriteQueue;
   };
   window.openSong = function (id, backTo) {
-    if (accessRevoked || accessVerificationPending) return;
+    if (!isConnected() || accessRevoked || accessVerificationPending) { maybeShowFirstProfileGate(); return; }
     if (!openingFromLive && memberRole !== 'voice1' && liveState && liveState.songId) {
       if (id !== liveState.songId) browseOverride = true;
       else browseOverride = false;
@@ -1467,7 +1701,7 @@
     renderMiniPlayer();
   };
   window.show = function (id) {
-    if ((accessRevoked || accessVerificationPending) && id !== 'vm') { if (typeof originalShow === 'function') originalShow('vl'); maybeShowFirstProfileGate(); return; }
+    if ((!isConnected() || accessRevoked || accessVerificationPending) && id !== 'vm') { if (typeof originalShow === 'function') originalShow('vl'); maybeShowFirstProfileGate(); return; }
     if (typeof originalShow === 'function') originalShow(id);
     document.body.classList.toggle('fc-reader-open', id === 'vr');
     if (id === 'vm') updateSyncButtons();
@@ -1477,7 +1711,8 @@
 
   // Editor de evento: asignación independiente por canción para acordeonista y tecladista.
   window.editEvent = function (id) {
-    if (isConnected() && !canManageEvents()) { alert('Solo Voz 1 · Director o el propietario técnico pueden editar los eventos.'); return; }
+    if (!isConnected()) { maybeShowFirstProfileGate(); return; }
+    if (!canManageEvents()) { alert('Solo Voz 1 · Director o el propietario técnico pueden editar los eventos.'); return; }
     var ev = id ? window.findEvent(id) : null;
     window.eventEditId = id || null;
     window.eventDraftSongIds = ev ? (ev.songIds || []).slice() : [];
@@ -1590,7 +1825,8 @@
     window.renderSongPicker();
   };
   window.saveEventEditor = async function () {
-    if (isConnected() && !canManageEvents()) { alert('Solo Voz 1 · Director o el propietario técnico pueden guardar eventos.'); return; }
+    if (!isConnected()) { maybeShowFirstProfileGate(); alert('Debes tener una solicitud aprobada para crear eventos.'); return; }
+    if (!canManageEvents()) { alert('Solo Voz 1 · Director o el propietario técnico pueden guardar eventos.'); return; }
     var name = $('eventName').value.trim();
     if (!name) { alert('Escribe el nombre del evento.'); $('eventName').focus(); return; }
     var previousEvents = JSON.parse(safeJson(window.events || []));
@@ -1629,11 +1865,11 @@
       meta.textContent = (ev.songIds || []).length + ' canciones · aprox. ' + window.formatDurationLong(window.eventDuration(ev.songIds)) + (isLive ? ' · EN VIVO' : '');
       main.append(name, meta); main.onclick = function () { window.openEvent(ev.id); };
       row.append(icon, main);
-      if (!isConnected() || canManageEvents()) { var edit = document.createElement('button'); edit.className = 'event-folder-edit'; edit.textContent = 'Editar'; edit.onclick = function () { window.editEvent(ev.id); }; row.appendChild(edit); }
+      if (isConnected() && canManageEvents()) { var edit = document.createElement('button'); edit.className = 'event-folder-edit'; edit.textContent = 'Editar'; edit.onclick = function () { window.editEvent(ev.id); }; row.appendChild(edit); }
       l.appendChild(row);
     });
   };
-  window.openEvent = function (id) { var ev = window.findEvent(id); if (!ev) return; window.currentEventId = id; window.fcPlaylistCategoryFilter = 'all'; window.renderEventPlaylist(); window.show('vplaylist'); };
+  window.openEvent = function (id) { if (!isConnected() || accessRevoked || accessVerificationPending) { maybeShowFirstProfileGate(); return; } var ev = window.findEvent(id); if (!ev) return; window.currentEventId = id; window.fcPlaylistCategoryFilter = 'all'; window.renderEventPlaylist(); window.show('vplaylist'); };
   window.renderEventPlaylist = function () {
     var ev = window.findEvent(window.currentEventId); if (!ev) return;
     $('playlistName').textContent = ev.name;
@@ -1642,7 +1878,7 @@
     $('playlistMeta').textContent = (ev.songIds || []).length + ' canciones · ' + accordionCount + ' Acordeón · ' + keyboardCount + ' Teclado · duración: ' + window.formatDurationLong(window.eventDuration(ev.songIds)) + (isConnected() ? ' · Banda sincronizada' : ' · Guardado en este teléfono');
     $('playlistMode').textContent = isConnected() ? roleName(memberRole) : (window.mode === 's' ? 'Vista cantante' : 'Vista bajista');
     $('playlistModeToggle').style.display = 'none';
-    $('playlistEdit').style.display = (!isConnected() || canManageEvents()) ? '' : 'none';
+    $('playlistEdit').style.display = (isConnected() && canManageEvents()) ? '' : 'none';
     $('eventShare').style.display = isConnected() ? 'none' : '';
     var shareArea = document.querySelector('.event-share-area'); if (shareArea) shareArea.style.display = isConnected() ? 'none' : '';
     var l = $('playlistSongs');
@@ -1675,7 +1911,7 @@
       detail.textContent = (section === 'keyboard' ? 'TECLADO' : 'ACORDEÓN') + ' · ' + (s.key ? 'Tono ' + displayKeyName(s.key) : 'Sin tonalidad') + ' · ' + window.formatDuration(window.songDuration(s)) + ' aprox.' + (instrumentForThisRole ? ' · Tú: ' + (instrumentForThisRole === 'guitar' ? 'Guitarra / acordes' : instrumentForThisRole === 'accordion' ? 'Acordeón / letra en vivo' : 'Teclado / letra en vivo') : '');
       open.append(title, detail); open.onclick = function () { window.openSong(s.id, 'vplaylist'); };
       row.append(no, open);
-      if (memberRole === 'voice1' && db && bandId) { var play = document.createElement('button'); play.className = 'p fc-play-song'; play.textContent = (liveState && liveState.songId === id && liveState.eventId === ev.id) ? 'En curso' : '▶ Tocar'; play.disabled = liveState && liveState.songId === id && liveState.eventId === ev.id; play.onclick = function () { setLiveSong(ev.id, s.id, i); window.openSong(s.id, 'vplaylist'); }; row.appendChild(play); }
+      if (isConnected() && memberRole === 'voice1' && db && bandId) { var play = document.createElement('button'); play.className = 'p fc-play-song'; play.textContent = (liveState && liveState.songId === id && liveState.eventId === ev.id) ? 'En curso' : '▶ Tocar'; play.disabled = liveState && liveState.songId === id && liveState.eventId === ev.id; play.onclick = function () { setLiveSong(ev.id, s.id, i); window.openSong(s.id, 'vplaylist'); }; row.appendChild(play); }
       l.appendChild(row);
     });
     if (!visibleCount) { var filteredEmpty = document.createElement('div'); filteredEmpty.className = 'playlist-empty'; filteredEmpty.textContent = 'No hay canciones en este bloque.'; l.appendChild(filteredEmpty); }
@@ -1702,6 +1938,7 @@
   function hideFirstProfileGate() {
     var gate = $('fcFirstProfileGate');
     if (gate) gate.style.display = 'none';
+    if (document.body) document.body.classList.remove('fc-session-pending');
   }
   function handleAccessRevoked(message, revokedKind) {
     if (handlingRevocation || (accessRevoked && !bandId && !memberProfile)) return;
@@ -1758,24 +1995,66 @@
   }
 
   function maybeShowFirstProfileGate() {
-    if ((!accessRevoked && !accessVerificationPending && selectedProfileRole) || memberProfile || !currentUser || firstProfileGateShown) return;
+    if (memberProfile || !currentUser || firstProfileGateShown) return;
     try { if (new URL(window.location.href).searchParams.get('fc_pair')) return; } catch (e) {}
     var gate = $('fcFirstProfileGate');
     if (!gate) return;
+    var grid = gate.querySelector('.fc-profile-grid');
+    var requestButton = $('fcGateRequestJoin');
+    var qrButton = $('fcProfileGateQr');
+    var ownerSetup = $('fcGateOwnerSetup');
+    var status = $('fcGateStatus');
+    var notice = $('fcGateRevokedNotice');
     if (accessVerificationPending) {
-      var noticePending = $('fcGateRevokedNotice'); if (noticePending) { noticePending.style.display = ''; noticePending.textContent = 'Verificando que este dispositivo siga autorizado. El catálogo permanecerá bloqueado hasta confirmar el acceso.'; }
-      var gridPending = gate.querySelector('.fc-profile-grid'); if (gridPending) gridPending.style.display = 'none';
-      var requestPending = $('fcGateRequestJoin'); if (requestPending) requestPending.style.display = 'none';
-      var qrPending = $('fcProfileGateQr'); if (qrPending) qrPending.style.display = 'none';
+      if (notice) { notice.style.display = ''; notice.textContent = 'Verificando que este dispositivo siga autorizado. El repertorio permanecerá bloqueado hasta confirmar el acceso.'; }
+      if (grid) grid.style.display = 'none';
+      if (requestButton) requestButton.style.display = 'none';
+      if (qrButton) qrButton.style.display = 'none';
+      if (ownerSetup) ownerSetup.style.display = 'none';
     } else if (accessRevoked) {
-      var notice = $('fcGateRevokedNotice'); if (notice) { notice.style.display = ''; notice.textContent = revocationMode === 'devices' ? 'Este dispositivo fue desvinculado. Escanea un nuevo QR de un dispositivo autorizado para volver a conectarlo.' : 'Tu acceso a la banda fue retirado. Elige tu función y solicita nuevamente la incorporación. No podrás ver canciones ni eventos hasta que el propietario te apruebe.'; }
-      var grid = gate.querySelector('.fc-profile-grid'); if (grid) grid.style.display = revocationMode === 'devices' ? 'none' : '';
-      var requestButton = $('fcGateRequestJoin'); if (requestButton) requestButton.style.display = revocationMode === 'devices' ? 'none' : '';
-      var qrButton = $('fcProfileGateQr'); if (qrButton) qrButton.style.display = revocationMode === 'devices' ? '' : 'none';
-      if (requestButton) requestButton.disabled = !selectedProfileRole || !!window.fcJoinRequestPending;
+      if (notice) { notice.style.display = ''; notice.textContent = revocationMode === 'devices' ? 'Este dispositivo fue desvinculado. Escanea un nuevo QR de un dispositivo autorizado para volver a conectarlo.' : 'Tu acceso a la banda fue retirado. Selecciona tu función y solicita nuevamente la incorporación. No podrás ver canciones ni eventos hasta que el propietario te apruebe.'; }
+      if (grid) grid.style.display = revocationMode === 'devices' ? 'none' : '';
+      if (requestButton) { requestButton.style.display = revocationMode === 'devices' ? 'none' : (selectedProfileRole && selectedProfileRole !== 'accordionist' ? '' : 'none'); requestButton.disabled = !!window.fcJoinRequestPending; requestButton.textContent = window.fcJoinRequestPending ? 'Solicitud pendiente' : 'Solicitar reincorporación'; }
+      if (qrButton) qrButton.style.display = revocationMode === 'devices' ? '' : 'none';
+      if (ownerSetup) ownerSetup.style.display = 'none';
+    } else if (currentUser.uid === OWNER_UID) {
+      if (notice) notice.style.display = 'none';
+      if (grid) grid.style.display = 'none';
+      if (status) status.textContent = 'Este es el dispositivo propietario. Abre la configuración para crear la banda o administrar sus integrantes.';
+      if (requestButton) requestButton.style.display = 'none';
+      if (qrButton) qrButton.style.display = 'none';
+      if (ownerSetup) ownerSetup.style.display = '';
+    } else {
+      if (notice) notice.style.display = 'none';
+      if (grid) grid.style.display = '';
+      if (ownerSetup) ownerSetup.style.display = 'none';
+      if (qrButton) qrButton.style.display = '';
+      if (incomingMemberInviteToken && incomingMemberInvite) {
+        if (grid) grid.style.display = 'none';
+        if (status) status.textContent = 'Te invitaron como ' + roleName(incomingMemberInvite.role) + '. Solicita acceso; el repertorio se desbloqueará solamente cuando el propietario te apruebe.';
+        if (requestButton) { requestButton.style.display = ''; requestButton.disabled = !!window.fcJoinRequestPending; requestButton.textContent = window.fcJoinRequestPending ? 'Solicitud pendiente' : 'Solicitar acceso como ' + roleName(incomingMemberInvite.role); }
+      } else if (window.fcJoinRequestPending) {
+        if (status) status.textContent = 'Tu solicitud está pendiente de aprobación. El catálogo y los eventos permanecerán bloqueados hasta que el propietario te autorice.';
+        if (requestButton) { requestButton.style.display = ''; requestButton.disabled = true; requestButton.textContent = 'Solicitud pendiente'; }
+      } else if (selectedProfileRole && selectedProfileRole !== 'accordionist') {
+        if (status) status.textContent = hasValidJoinEntryPoint()
+          ? 'Perfil seleccionado: ' + roleName(selectedProfileRole) + '. Pulsa Solicitar acceso. No verás el repertorio hasta que el propietario te apruebe.'
+          : 'Perfil seleccionado: ' + roleName(selectedProfileRole) + '. Para solicitar acceso necesitas abrir el enlace de invitación que te envió el propietario.';
+        if (requestButton) { requestButton.style.display = hasValidJoinEntryPoint() ? '' : 'none'; requestButton.disabled = !!window.fcJoinRequestPending; requestButton.textContent = 'Solicitar acceso'; }
+      } else {
+        if (status) status.textContent = genericJoinLink
+          ? 'Abriste una invitación general a Frecuencia Cero. Selecciona tu función y solicita acceso; el propietario debe aprobarte.'
+          : 'Selecciona tu función para identificar el perfil que necesitas. Para solicitar acceso, abre el enlace de invitación que te envió el propietario. La dirección pública no concede acceso.';
+        if (requestButton) requestButton.style.display = 'none';
+      }
+    }
+    if (grid && selectedProfileRole && !incomingMemberInviteToken) {
+      var selectedButton = grid.querySelector('[data-role="' + selectedProfileRole + '"]');
+      if (selectedButton) selectedButton.classList.add('selected');
     }
     firstProfileGateShown = true;
     gate.style.display = 'grid';
+    if (document.body) document.body.classList.remove('fc-session-pending');
   }
   async function checkForAppUpdates() {
     var button = $('fcCheckUpdates');
@@ -1788,7 +2067,7 @@
         return;
       }
       var registration = await navigator.serviceWorker.getRegistration('./');
-      if (!registration) registration = await navigator.serviceWorker.register('./sw.js?v=23');
+      if (!registration) registration = await navigator.serviceWorker.register('./sw.js?v=24');
       var controllerChanged = new Promise(function (resolve) {
         var finished = false;
         var finish = function () {
@@ -1842,6 +2121,7 @@
         '<div id="fcSyncStatus" class="fc-status neutral">Conectando con Firebase…</div>' +
         '<div class="fc-band-box"><strong>Mi perfil en Frecuencia Cero</strong><label class="fc-field-label" for="fcProfileSelect">Selecciona quién utiliza este teléfono</label><select id="fcProfileSelect"><option value="">Seleccionar perfil…</option><option value="voice1">Voz 1 · Hombre (Director)</option><option value="voice2">Voz 2 · Mujer</option><option value="bass">Bajista</option><option value="accordionist">Acordeonista</option><option value="drummer">Baterista</option><option value="keyboardist">Tecladista</option></select><button id="fcProfileSave" class="p">Guardar mi perfil</button><p id="fcBandSummary" class="note">Selecciona tu perfil para continuar.</p><label class="fc-field-label" for="fcBandName">Nombre de la banda</label><input id="fcBandName" placeholder="Frecuencia Cero" value="Frecuencia Cero"><button id="fcCreateBand" class="p" style="display:none">Crear banda como propietario técnico</button><div id="fcOwnerMismatch" class="fc-pair-box" style="display:none"><strong>Este parece ser el primer dispositivo, pero el UID no coincide con el propietario configurado.</strong><p class="note">No necesitas QR para iniciar la banda. Copia este ID actual y actualizaremos la autorización de Firebase.</p><code id="fcCurrentOwnerUid"></code><button type="button" id="fcCopyCurrentOwnerUid">Copiar ID actual</button></div><button id="fcRequestJoin" class="p" style="display:none">Solicitar incorporación</button><p class="note">El propietario crea la banda primero. Una vez conectada, utiliza el botón independiente para generar un QR. Los demás integrantes solicitan acceso y el propietario los aprueba; un QR vincula otro teléfono al mismo perfil.</p><div class="note">ID de este teléfono: <code id="fcDeviceUid">Preparando…</code> <button id="fcCopyUid" style="display:none">Copiar ID</button></div><div id="fcPairActions" class="fc-pair-actions"><div class="fc-member-head"><strong>Vincular otro dispositivo</strong></div><p id="fcPairHelp" class="note">El dispositivo autorizado genera el QR; el dispositivo nuevo lo escanea.</p><button id="fcLinkDevice" type="button" style="display:none">▦ Generar código QR</button><button id="fcScanDeviceLink" class="p" style="display:none">📷 Escanear código QR</button></div><div id="fcPairQrBox" class="fc-pair-box" style="display:none"></div><div id="fcPairScannerWrap" class="fc-pair-box" style="display:none"><div id="fcPairScanner"></div><p id="fcPairScannerStatus" class="note">Preparando cámara…</p><button type="button" id="fcPairScannerClose">Cerrar cámara</button></div></div>' +
         '<div id="fcJoinRequests" class="fc-member-admin" style="display:none"><div class="fc-member-head"><strong>Solicitudes de integrantes</strong></div><div id="fcJoinRequestsList"></div></div>' +
+        '<div id="fcMemberInvitePanel" class="fc-member-admin" style="display:none"><div class="fc-member-head"><strong>Invitar integrantes por enlace</strong></div><p class="note">El enlace general permite que la persona elija su función. También puedes enviar un enlace con la función preseleccionada. En ambos casos debe solicitar acceso y tú debes aprobarlo.</p><label class="fc-field-label" for="fcMemberInviteRole">Función de la invitación</label><select id="fcMemberInviteRole"><option value="choose">Enlace general · la persona elige</option><option value="voice1">Voz 1 · Director</option><option value="voice2">Voz 2</option><option value="bass">Bajista</option><option value="drummer">Baterista</option><option value="keyboardist">Tecladista</option></select><button id="fcCreateMemberInvite" class="p" type="button">Crear enlace de invitación</button><input id="fcMemberInviteUrl" type="text" readonly style="display:none" aria-label="Enlace de invitación"><button id="fcCopyMemberInvite" type="button" style="display:none">Copiar enlace</button><p id="fcMemberInviteResult" class="note"></p></div>' +
         '<div id="fcMemberAdmin" class="fc-member-admin" style="display:none"><div class="fc-member-head"><strong>Integrantes y funciones (6 plazas)</strong><span id="fcOnlineCount" class="note"></span></div><p class="note">El propietario técnico administra el catálogo, integrantes y dispositivos. Voz 1 dirige los eventos y puede crear y organizar repertorios. Cada función se asigna a una sola persona.</p><div id="fcMembers"></div></div>' +
         '<div id="fcMyDevicesBox" class="fc-member-admin" style="display:none"><div class="fc-member-head"><strong>Mis dispositivos vinculados</strong></div><p class="note">Puedes vincular varios teléfonos o tablets a tu mismo perfil y revocar los que ya no utilices.</p><div id="fcMyDevices"></div></div>' +
         '<label class="fc-follow-row"><input type="checkbox" id="fcFollow" checked> Seguir automáticamente la canción que elija Voz 1</label>';
@@ -1849,7 +2129,7 @@
     }
     if (!$('fcFirstProfileGate')) {
       var gate = document.createElement('div'); gate.id = 'fcFirstProfileGate'; gate.className = 'fc-profile-gate'; gate.style.display = 'none';
-      gate.innerHTML = '<div class="fc-profile-card"><div class="fc-profile-brand">♫</div><strong class="fc-profile-title">Frecuencia Cero</strong><p id="fcGateRevokedNotice" class="note" style="display:none;font-weight:800;color:#c45b38">Tu acceso a la banda fue retirado. Elige tu función y solicita nuevamente la incorporación. No podrás ver canciones ni eventos hasta que el propietario te apruebe.</p><p class="note">Selecciona quién utiliza este dispositivo.</p><div class="fc-profile-grid"><button data-role="voice1"><b>🎤 Voz 1</b><small>Director musical</small></button><button data-role="voice2"><b>🎤 Voz 2</b><small>Cantante</small></button><button data-role="bass"><b>🎸 Bajista</b><small>Acordes</small></button><button data-role="accordionist"><b>🪗 Acordeonista</b><small>Acordeón / guitarra</small></button><button data-role="drummer"><b>🥁 Baterista</b><small>Seguimiento</small></button><button data-role="keyboardist"><b>🎹 Tecladista</b><small>Teclado / guitarra</small></button></div><p id="fcGateStatus" class="note fc-profile-foot">Si eres un integrante nuevo, selecciona tu función y solicita acceso. Si es otro teléfono de un integrante ya autorizado, escanea su QR.</p><button type="button" id="fcGateRequestJoin" class="p" style="display:none">Solicitar reincorporación</button><div class="note">ID de este teléfono: <code id="fcGateUid">Preparando…</code> <button type="button" id="fcGateCopyUid">Copiar ID</button></div><button type="button" id="fcProfileGateQr">Ya tengo un QR para vincular</button></div>';
+      gate.innerHTML = '<div class="fc-profile-card"><div class="fc-profile-brand">♫</div><strong class="fc-profile-title">Frecuencia Cero</strong><p id="fcGateRevokedNotice" class="note" style="display:none;font-weight:800;color:#c45b38">Tu acceso a la banda fue retirado. Elige tu función y solicita nuevamente la incorporación.</p><p id="fcGateIntro" class="note">Selecciona tu función. Elegir un perfil no concede acceso: el propietario debe aprobar tu solicitud.</p><div class="fc-profile-grid"><button data-role="voice1"><b>🎤 Voz 1</b><small>Director musical</small></button><button data-role="voice2"><b>🎤 Voz 2</b><small>Cantante</small></button><button data-role="bass"><b>🎸 Bajista</b><small>Acordes</small></button><button data-role="accordionist"><b>🪗 Acordeonista</b><small>Reservado al propietario</small></button><button data-role="drummer"><b>🥁 Baterista</b><small>Seguimiento</small></button><button data-role="keyboardist"><b>🎹 Tecladista</b><small>Teclado / guitarra</small></button></div><p id="fcGateStatus" class="note fc-profile-foot">El catálogo y los eventos se mostrarán únicamente después de que Firebase confirme tu autorización.</p><button type="button" id="fcGateRequestJoin" class="p" style="display:none">Solicitar acceso</button><button type="button" id="fcGateOwnerSetup" class="p" style="display:none">Abrir configuración del propietario</button><div class="note">ID de este dispositivo: <code id="fcGateUid">Preparando…</code> <button type="button" id="fcGateCopyUid">Copiar ID</button></div><button type="button" id="fcProfileGateQr">Ya tengo un QR para vincular</button></div>';
       document.body.appendChild(gate);
       if (accessRevoked || accessVerificationPending) {
         gate.style.display = 'grid'; firstProfileGateShown = true;
@@ -1862,23 +2142,31 @@
         button.onclick = function () {
           var role = button.dataset.role;
           selectedProfileRole = role; localStorage.setItem(PROFILE_KEY, role);
-          if (accessRevoked) {
-            var notice = $('fcGateStatus');
-            var requestButton = $('fcGateRequestJoin');
-            if (role === 'accordionist' && currentUser && currentUser.uid !== OWNER_UID) {
-              if (notice) notice.textContent = 'Acordeonista es la función reservada al propietario técnico. Selecciona otra función para solicitar reincorporación.';
-              if (requestButton) requestButton.style.display = 'none';
-            } else {
-              if (notice) notice.textContent = 'Perfil seleccionado: ' + roleName(role) + '. Pulsa Solicitar reincorporación; el catálogo se desbloqueará únicamente cuando el propietario te apruebe.';
-              if (requestButton) { requestButton.style.display = ''; requestButton.disabled = !!window.fcJoinRequestPending; requestButton.textContent = window.fcJoinRequestPending ? 'Solicitud pendiente' : 'Solicitar reincorporación'; }
-            }
-            updateSyncButtons(); return;
+          Array.prototype.forEach.call(gate.querySelectorAll('[data-role]'), function (other) { other.classList.toggle('selected', other === button); });
+          var notice = $('fcGateStatus');
+          var requestButton = $('fcGateRequestJoin');
+          var ownerButton = $('fcGateOwnerSetup');
+          if (role === 'accordionist' && (!currentUser || currentUser.uid !== OWNER_UID)) {
+            if (notice) notice.textContent = 'Acordeonista está reservado al propietario técnico. Selecciona otra función para solicitar acceso.';
+            if (requestButton) requestButton.style.display = 'none';
+            if (ownerButton) ownerButton.style.display = 'none';
+            return;
           }
-          hideFirstProfileGate(); updateSyncButtons();
-          setStatus(role === 'accordionist' && currentUser && currentUser.uid !== OWNER_UID ? 'Perfil Acordeonista seleccionado. No escanees QR: copia el UID actual en Más → Mi banda y sincronización para ajustar la autorización inicial.' : 'Perfil guardado: ' + roleName(role) + '. Completa la incorporación en Más → Mi banda y sincronización.', role === 'accordionist' && currentUser && currentUser.uid !== OWNER_UID ? 'warning' : 'success');
-          if (typeof window.show === 'function') window.show('vm');
+          if (role === 'accordionist' && currentUser && currentUser.uid === OWNER_UID) {
+            if (notice) notice.textContent = 'Este es el perfil del propietario. Abre la configuración para crear o administrar la banda.';
+            if (requestButton) requestButton.style.display = 'none';
+            if (ownerButton) ownerButton.style.display = '';
+            return;
+          }
+          if (notice) notice.textContent = hasValidJoinEntryPoint()
+            ? 'Perfil seleccionado: ' + roleName(role) + '. Pulsa Solicitar acceso. No podrás ver canciones ni eventos hasta que el propietario te apruebe.'
+            : 'Perfil seleccionado: ' + roleName(role) + '. Para solicitar acceso necesitas abrir el enlace de invitación que te envió el propietario.';
+          if (requestButton) { requestButton.style.display = hasValidJoinEntryPoint() ? '' : 'none'; requestButton.disabled = !!window.fcJoinRequestPending; requestButton.textContent = window.fcJoinRequestPending ? 'Solicitud pendiente' : 'Solicitar acceso'; }
+          if (ownerButton) ownerButton.style.display = 'none';
+          updateSyncButtons();
         };
       });
+      var gateOwnerSetup = $('fcGateOwnerSetup'); if (gateOwnerSetup) gateOwnerSetup.onclick = function () { hideFirstProfileGate(); if (typeof window.show === 'function') window.show('vm'); };
       var gateQr = $('fcProfileGateQr'); if (gateQr) gateQr.onclick = function () { hideFirstProfileGate(); if (typeof window.show === 'function') window.show('vm'); setTimeout(function () { if ($('fcScanDeviceLink')) $('fcScanDeviceLink').click(); }, 250); };
       var gateRequest = $('fcGateRequestJoin'); if (gateRequest) gateRequest.onclick = function () { if (!selectedProfileRole) { var status = $('fcGateStatus'); if (status) status.textContent = 'Primero selecciona tu función.'; return; } requestJoin(); };
       var gateCopy = $('fcGateCopyUid'); if (gateCopy) gateCopy.onclick = function () { var uid = currentUser && currentUser.uid || ''; if (!uid) return; if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(uid).then(function () { alert('ID copiado: ' + uid); }).catch(function () { alert('ID de este teléfono: ' + uid); }); else alert('ID de este teléfono: ' + uid); };
@@ -1911,6 +2199,7 @@
     if ($('fcSignOut')) $('fcSignOut').onclick = signOut;
     if ($('fcCreateBand')) $('fcCreateBand').onclick = handleOwnerBandAction;
     if ($('fcRequestJoin')) $('fcRequestJoin').onclick = requestJoin;
+    if ($('fcCreateMemberInvite')) $('fcCreateMemberInvite').onclick = createMemberInviteLink;
     if ($('fcLinkDevice')) $('fcLinkDevice').onclick = handleGeneratePairQr;
     if ($('fcCheckUpdates')) $('fcCheckUpdates').onclick = checkForAppUpdates;
     if ($('fcScanDeviceLink')) $('fcScanDeviceLink').onclick = startPairScanner;
@@ -1920,9 +2209,10 @@
       if (!role) { alert('Selecciona una función.'); return; }
       if (isConnected()) { alert('Tu función ya fue asignada por el propietario técnico. Para cambiarla, solicita que actualice tu perfil.'); return; }
       selectedProfileRole = role; localStorage.setItem(PROFILE_KEY, role);
-      hideFirstProfileGate();
+      maybeShowFirstProfileGate();
+      var gateStatus = $('fcGateStatus'); if (gateStatus) gateStatus.textContent = 'Perfil seleccionado: ' + roleName(role) + '. Solicita acceso y espera la aprobación del propietario.';
+      var gateRequest = $('fcGateRequestJoin'); if (gateRequest) { gateRequest.style.display = (role !== 'accordionist' && hasValidJoinEntryPoint()) ? '' : 'none'; gateRequest.disabled = !!window.fcJoinRequestPending; gateRequest.textContent = window.fcJoinRequestPending ? 'Solicitud pendiente' : 'Solicitar acceso'; }
       updateSyncButtons();
-      setStatus(role === 'voice1' ? 'Perfil Voz 1 seleccionado. Solicita incorporación a la banda.' : 'Perfil ' + roleName(role) + ' seleccionado. Pulsa Solicitar incorporación.', 'success');
     };
     if ($('fcProfileSelect')) $('fcProfileSelect').onchange = function () { selectedProfileRole = this.value; updateSyncButtons(); };
     if ($('fcCopyUid')) $('fcCopyUid').onclick = function () {
@@ -1980,7 +2270,6 @@
     else setStatus('Firebase no se ha cargado. Comprueba Internet y vuelve a abrir la página.', 'error');
     if ($('fcProfileSelect') && selectedProfileRole) $('fcProfileSelect').value = selectedProfileRole;
     if (currentUser) { setText('fcGateUid', currentUser.uid); setText('fcCurrentOwnerUid', currentUser.uid); }
-    if (selectedProfileRole && !accessRevoked && !accessVerificationPending) hideFirstProfileGate();
     if (accessRevoked || accessVerificationPending) { var revokedNotice = $('fcGateRevokedNotice'); if (revokedNotice) revokedNotice.style.display = ''; maybeShowFirstProfileGate(); }
     updateSyncButtons();
   }
@@ -2009,7 +2298,6 @@
   window.addEventListener('online', function () { if (currentUser && bandId && db) setStatus('Conexión recuperada. Sincronizando…', 'success'); renderMiniPlayer(); });
   window.addEventListener('offline', function () { if (currentUser && bandId) setStatus('Sin Internet. Se conserva la última información descargada; los cambios se sincronizarán al reconectar.', 'warning'); renderMiniPlayer(); });
   renderEvents(); renderLiveBanner(); startAutoConnect(); updateSyncButtons();
-  if (selectedProfileRole && !accessRevoked && !accessVerificationPending) hideFirstProfileGate();
-  else setTimeout(maybeShowFirstProfileGate, 1800);
+  setTimeout(maybeShowFirstProfileGate, 400);
   if (accessRevoked || accessVerificationPending) { var rn = $('fcGateRevokedNotice'); if (rn) rn.style.display = ''; }
 })();

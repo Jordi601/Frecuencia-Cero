@@ -1,22 +1,9 @@
-FRECUENCIA CERO V23 — GUARDADO DE EVENTOS Y ORDENAMIENTO POR ARRASTRE
+Frecuencia Cero V24 — Acceso controlado e invitaciones por enlace
 
-CORRECCIÓN DEL GUARDADO
-- La V22 guardaba eventos localmente y después intentaba publicarlos en Firebase.
-- Las reglas anteriores permitían escribir eventos al propietario directo y a Voz 1, pero no al dispositivo vinculado al perfil Acordeonista propietario.
-- Las reglas V23 permiten la escritura al dispositivo QR únicamente si está vinculado al UID propietario configurado y la ficha del propietario conserva role=accordionist e isOwner=true. Se mantiene el permiso existente de Voz 1.
-- El guardado del evento ahora espera la confirmación de Firebase antes de abrir la carpeta.
-- Si Firebase rechaza la escritura, la aplicación restaura la lista anterior, conserva el borrador anterior en la pantalla y muestra un mensaje explícito.
-
-ORDENAMIENTO
-- Se sustituyeron las flechas subir/bajar por un asa de tres líneas.
-- Mantén pulsada el asa y arrastra la canción a la posición deseada.
-- Funciona con mouse y pantallas táctiles mediante Pointer Events.
-- También conserva accesibilidad básica con flechas arriba/abajo cuando el asa tiene foco.
-
-INSTALACIÓN — IMPORTANTE
-1. En Firebase Console > Realtime Database > Rules, guarda una copia de las reglas actuales.
-2. Publica el contenido de RealtimeDB_Rules_V23.json.
-3. Después sube todos los archivos del ZIP a la raíz del repositorio GitHub Pages y confirma los cambios.
-4. Actualiza los dispositivos desde Más > Buscar actualizaciones.
-
-No se cambia el UID propietario, la banda, los integrantes, las canciones ni los eventos ya guardados. No se requiere volver a crear Firebase.
+- Gate obligatorio para navegadores sin membresía Firebase verificada.
+- La URL pública no concede acceso y no presenta un botón de solicitud sin invitación.
+- Enlace general: invitado selecciona función y solicita; el propietario aprueba. Reutilizable.
+- Enlace con función preasignada: invitado recibe un rol sugerido, solicita y espera aprobación. Token de un solo uso, 7 días.
+- QR sigue sirviendo para vincular dispositivos adicionales a un integrante autorizado.
+- El catálogo estático se retiró del HTML público actual; las letras se cargan desde Realtime Database tras autorización.
+- Se conserva UID propietario y band ID actuales.

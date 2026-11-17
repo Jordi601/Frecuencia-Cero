@@ -1,4 +1,4 @@
-const CACHE_NAME = 'frecuencia-cero-shell-v23-event-save-drag-sort';
+const CACHE_NAME = 'frecuencia-cero-shell-v24-auth-gate-member-invites-no-public-catalog';
 const APP_FILES = [
   './',
   './index.html',
