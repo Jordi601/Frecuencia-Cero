@@ -1,1 +1,1 @@
-V22: pega la letra directamente desde la web, incluso si los acordes están en negritas sobre cada verso. Pulsa “Convertir acordes y detectar datos”; verás cómo **C** se convierte en [C]. Selecciona uno de los 12 tonos mayores o 12 menores y el bloque Acordeón/Teclado.
+Frecuencia Cero V23. Publica primero RealtimeDB_Rules_V23.json en Firebase Realtime Database > Rules. Después sustituye los archivos del repositorio GitHub Pages con el contenido de este ZIP.

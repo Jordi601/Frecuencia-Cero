@@ -4,7 +4,7 @@
 (function () {
   'use strict';
 
-  var APP_VERSION = 'V20';
+  var APP_VERSION = 'V23';
   var CFG_KEY = 'fc_firebase_config_v1';
   var BAND_KEY = 'fc_band_id_v1';
   var PROFILE_KEY = 'fc_device_profile_v1';
@@ -56,6 +56,9 @@
   var lastEventsJson = '';
   var catalogWriteQueue = Promise.resolve();
   var catalogWriteQueuedJson = '';
+  var eventsWriteQueue = Promise.resolve();
+  var eventsWriteQueuedJson = '';
+  var eventDragState = null;
   var currentUser = null;
   var bandId = ''; // Se fija al aprobar el dispositivo en la banda Frecuencia Cero
   var bandMeta = null;
@@ -1421,15 +1424,37 @@
     });
   };
   window.saveEvents = function () {
-    if (accessRevoked || accessVerificationPending) return;
+    if (accessRevoked || accessVerificationPending) return Promise.reject(new Error('Este dispositivo no tiene autorización para guardar eventos.'));
     if (typeof originalSaveEvents === 'function') originalSaveEvents();
-    if (!applyingRemote && db && bandId && (isTechnicalOwner() || memberRole === 'voice1')) {
-      var payload = mapById(window.events || []), serialized = safeJson(payload);
-      if (serialized !== lastEventsJson) {
-        lastEventsJson = serialized;
-        db.ref(bandPath('events')).set(payload).catch(function (err) { setStatus('Error al publicar los eventos: ' + err.message, 'error'); });
-      }
+    if (applyingRemote) return Promise.resolve(true);
+    if (!db || !bandId) return Promise.resolve(true); // modo local cuando no hay banda conectada
+    if (!(isTechnicalOwner() || memberRole === 'voice1')) {
+      var denied = new Error('Este perfil no tiene permiso para crear o modificar eventos.');
+      setStatus(denied.message, 'warning');
+      return Promise.reject(denied);
     }
+    var payload = mapById(window.events || []), serialized = safeJson(payload);
+    if (serialized === lastEventsJson) return Promise.resolve(true);
+    if (serialized === eventsWriteQueuedJson) return eventsWriteQueue;
+    eventsWriteQueuedJson = serialized;
+    var targetBand = bandId;
+    eventsWriteQueue = eventsWriteQueue.catch(function () {}).then(function () {
+      if (accessRevoked || accessVerificationPending || !db || bandId !== targetBand) throw new Error('La conexión con la banda cambió antes de guardar el evento.');
+      return db.ref(bandPath('events')).set(payload);
+    }).then(function () {
+      if (bandId === targetBand) lastEventsJson = serialized;
+      if (eventsWriteQueuedJson === serialized) eventsWriteQueuedJson = '';
+      setStatus('Evento guardado y sincronizado con Firebase.', 'success');
+      return true;
+    }).catch(function (err) {
+      if (eventsWriteQueuedJson === serialized) eventsWriteQueuedJson = '';
+      var detail = err && err.code === 'PERMISSION_DENIED'
+        ? 'Firebase rechazó el guardado. Publica las reglas V23 de Realtime Database para permitir al dispositivo vinculado al propietario guardar eventos.'
+        : 'No se pudo sincronizar el evento: ' + (err && err.message ? err.message : 'error de conexión.');
+      setStatus(detail, 'error');
+      throw new Error(detail);
+    });
+    return eventsWriteQueue;
   };
   window.openSong = function (id, backTo) {
     if (accessRevoked || accessVerificationPending) return;
@@ -1477,20 +1502,66 @@
     window.renderEventEditor();
     window.show('vset');
   };
+  function bindEventDragHandle(handle, row, container, index) {
+    handle.addEventListener('pointerdown', function (event) {
+      if (event.pointerType === 'mouse' && event.button !== 0) return;
+      if (event.target && event.target.closest && event.target.closest('button:not(.fc-drag-handle)')) return;
+      event.preventDefault();
+      eventDragState = { pointerId: event.pointerId, from: index, to: index, handle: handle, row: row, container: container };
+      handle.classList.add('is-dragging');
+      row.classList.add('is-drag-source');
+      try { handle.setPointerCapture(event.pointerId); } catch (e) {}
+    });
+    handle.addEventListener('pointermove', function (event) {
+      if (!eventDragState || eventDragState.pointerId !== event.pointerId) return;
+      var under = document.elementFromPoint(event.clientX, event.clientY);
+      var targetRow = under && under.closest ? under.closest('.event-selected-row') : null;
+      if (!targetRow || !container.contains(targetRow)) return;
+      var nextIndex = Number(targetRow.dataset.index);
+      if (!Number.isFinite(nextIndex)) return;
+      eventDragState.to = nextIndex;
+      Array.prototype.forEach.call(container.querySelectorAll('.event-selected-row'), function (item) {
+        item.classList.toggle('is-drop-target', item === targetRow && nextIndex !== eventDragState.from);
+      });
+    });
+    function finish(event) {
+      if (!eventDragState || eventDragState.pointerId !== event.pointerId) return;
+      var state = eventDragState;
+      eventDragState = null;
+      if (state.handle) state.handle.classList.remove('is-dragging');
+      if (state.row) state.row.classList.remove('is-drag-source');
+      Array.prototype.forEach.call(container.querySelectorAll('.event-selected-row'), function (item) { item.classList.remove('is-drop-target'); });
+      if (state.to !== state.from && state.to >= 0 && state.to < window.eventDraftSongIds.length) {
+        var moved = window.eventDraftSongIds.splice(state.from, 1)[0];
+        window.eventDraftSongIds.splice(state.to, 0, moved);
+        window.renderEventEditor();
+      }
+    }
+    handle.addEventListener('pointerup', finish);
+    handle.addEventListener('pointercancel', finish);
+    handle.addEventListener('lostpointercapture', function (event) {
+      if (eventDragState && eventDragState.pointerId === event.pointerId) finish(event);
+    });
+    handle.addEventListener('keydown', function (event) {
+      if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+      event.preventDefault();
+      window.moveDraftSong(index, event.key === 'ArrowUp' ? -1 : 1);
+    });
+  }
+
   window.renderEventEditor = function () {
     var chosen = $('eventSelected'); chosen.innerHTML = '';
     $('eventSelectedCount').textContent = window.eventDraftSongIds.length + ' seleccionadas · aprox. ' + window.formatDurationLong(window.eventDuration(window.eventDraftSongIds));
     if (!window.eventDraftSongIds.length) { var msg = document.createElement('p'); msg.className = 'note'; msg.textContent = 'Aún no agregas canciones. Selecciónalas en el catálogo de abajo.'; chosen.appendChild(msg); }
     window.eventDraftSongIds.forEach(function (id, i) {
-      var s = window.find(id), row = document.createElement('div'); row.className = 'event-selected-row fc-event-selected-row';
+      var s = window.find(id), row = document.createElement('div'); row.className = 'event-selected-row fc-event-selected-row'; row.dataset.index = String(i);
       var head = document.createElement('div'); head.className = 'fc-event-song-head';
+      var handle = document.createElement('button'); handle.type = 'button'; handle.className = 'fc-drag-handle'; handle.textContent = '☰'; handle.title = 'Mantén pulsado y arrastra para ordenar'; handle.setAttribute('aria-label', 'Mover ' + (s ? s.title : 'canción'));
       var pos = document.createElement('span'); pos.className = 'event-position'; pos.textContent = i + 1;
       var title = document.createElement('span'); title.className = 'event-selected-title'; title.textContent = s ? s.title : 'Canción no disponible';
       var duration = document.createElement('small'); duration.className = 'event-selected-time'; duration.textContent = s ? window.formatDuration(window.songDuration(s)) : '--:--';
-      var up = document.createElement('button'); up.textContent = '↑'; up.title = 'Subir'; up.disabled = i === 0; up.onclick = function () { window.moveDraftSong(i, -1); };
-      var down = document.createElement('button'); down.textContent = '↓'; down.title = 'Bajar'; down.disabled = i === window.eventDraftSongIds.length - 1; down.onclick = function () { window.moveDraftSong(i, 1); };
-      var remove = document.createElement('button'); remove.textContent = '×'; remove.title = 'Quitar del evento'; remove.onclick = function () { window.eventDraftSongIds.splice(i, 1); renderEventEditor(); };
-      head.append(pos, title, duration, up, down, remove); row.appendChild(head);
+      var remove = document.createElement('button'); remove.type = 'button'; remove.textContent = '×'; remove.title = 'Quitar del evento'; remove.setAttribute('aria-label', 'Quitar ' + (s ? s.title : 'canción') + ' del evento'); remove.onclick = function () { window.eventDraftSongIds.splice(i, 1); window.renderEventEditor(); };
+      head.append(handle, pos, title, duration, remove); row.appendChild(head);
       var controls = document.createElement('div'); controls.className = 'fc-section-control';
       var keyMeta = document.createElement('span'); keyMeta.className = 'fc-section-key';
       keyMeta.textContent = s && s.key ? 'Tono ' + displayKeyName(s.key) : 'Tono no especificado';
@@ -1508,26 +1579,42 @@
           eventDraftAssignments[id].manualSection = true;
           eventDraftAssignments[id].section = section.value;
         }
-        // Al cambiar el bloque, limpia excepciones previas para que se aplique la regla automática.
         var prefix = (window.currentEventId || 'catalog') + ':' + id + ':';
         delete instrumentOverrides[prefix + 'accordionist'];
         delete instrumentOverrides[prefix + 'keyboardist'];
         localStorage.setItem(OVERRIDE_KEY, safeJson(instrumentOverrides));
       };
       sectionLabel.appendChild(section); controls.append(keyMeta, sectionLabel); row.appendChild(controls); chosen.appendChild(row);
+      bindEventDragHandle(handle, row, chosen, i);
     });
     window.renderSongPicker();
   };
-  window.saveEventEditor = function () {
+  window.saveEventEditor = async function () {
     if (isConnected() && !canManageEvents()) { alert('Solo Voz 1 · Director o el propietario técnico pueden guardar eventos.'); return; }
     var name = $('eventName').value.trim();
     if (!name) { alert('Escribe el nombre del evento.'); $('eventName').focus(); return; }
+    var previousEvents = JSON.parse(safeJson(window.events || []));
     var ev = window.eventEditId ? window.findEvent(window.eventEditId) : null;
-    if (!ev) { ev = { id: 'evt_' + Date.now(), name: name, songIds: [], assignments: {}, createdAt: Date.now() }; window.events.push(ev); }
+    if (!ev) { ev = { id: 'evt_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7), name: name, songIds: [], assignments: {}, createdAt: Date.now() }; window.events.push(ev); }
     ev.name = name; ev.songIds = window.eventDraftSongIds.slice(); ev.assignments = {};
     ev.songIds.forEach(function (id) { ev.assignments[id] = eventDraftAssignments[id] || eventAssignmentDefaults(id); });
-    ev.updatedAt = Date.now(); window.saveEvents(); window.renderEvents(); window.currentEventId = ev.id; window.openEvent(ev.id);
+    ev.updatedAt = Date.now();
+    var saveButton = $('eventSave');
+    if (saveButton) { saveButton.disabled = true; saveButton.textContent = 'Guardando…'; }
+    try {
+      await window.saveEvents();
+      window.renderEvents(); window.currentEventId = ev.id; window.openEvent(ev.id);
+    } catch (err) {
+      window.events = previousEvents;
+      localSaveEvents();
+      window.renderEvents();
+      setStatus(err && err.message ? err.message : 'El evento no pudo guardarse.', 'error');
+      alert('El evento no se guardó en la banda. No se perderá tu repertorio: revisa tu conexión y los permisos de Firebase e inténtalo otra vez.\n\n' + (err && err.message ? err.message : 'Error desconocido.'));
+    } finally {
+      if (saveButton) { saveButton.disabled = false; saveButton.textContent = 'Guardar evento'; }
+    }
   };
+
 
   window.renderEvents = function () {
     var l = $('eventList'); if (!l) return; l.innerHTML = '';
@@ -1701,7 +1788,7 @@
         return;
       }
       var registration = await navigator.serviceWorker.getRegistration('./');
-      if (!registration) registration = await navigator.serviceWorker.register('./sw.js?v=18');
+      if (!registration) registration = await navigator.serviceWorker.register('./sw.js?v=23');
       var controllerChanged = new Promise(function (resolve) {
         var finished = false;
         var finish = function () {
@@ -1872,6 +1959,7 @@
   function addStyles() {
     var css = '' +
       '.fc-sync-panel{border:1px solid var(--line);border-radius:16px;padding:13px;background:var(--card);display:flex;flex-direction:column;gap:9px}' +
+      '.fc-drag-handle{width:32px;min-width:32px;height:36px;min-height:36px;padding:0;border:0!important;background:transparent!important;box-shadow:none!important;color:var(--mut);font-size:22px;font-weight:900;letter-spacing:-3px;cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none}.fc-drag-handle:active,.fc-drag-handle.is-dragging{cursor:grabbing;color:var(--acc);background:color-mix(in srgb,var(--acc) 10%,transparent)!important}.fc-event-selected-row{transition:transform .12s ease,border-color .12s ease}.fc-event-selected-row.is-drop-target{border:2px dashed var(--acc);background:color-mix(in srgb,var(--acc) 8%,var(--card))}.fc-event-selected-row.is-drag-source{opacity:.45}.event-selected-row .fc-event-song-head{min-width:0}.event-selected-row .fc-event-song-head .event-selected-title{min-width:0}.event-selected-row .fc-event-song-head>button:not(.fc-drag-handle){min-width:36px}' +
       '.fc-panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}.fc-panel-head strong{font-size:17px}.fc-panel-icon{font-size:25px}' +
       '.fc-status{padding:9px 11px;border-radius:10px;font-size:13px;font-weight:700;background:var(--bg)}.fc-status.success{color:#16764b;background:rgba(22,139,88,.10)}.fc-status.warning{color:#946200;background:rgba(220,160,30,.13)}.fc-status.error{color:#b3261e;background:rgba(179,38,30,.10)}' +
       '.fc-field-label{font-size:12px;color:var(--mut);font-weight:800;margin-top:3px}.fc-auth-row,.fc-invite-row{display:flex;gap:7px}.fc-auth-row button,.fc-invite-row button{flex:1;min-width:0}.fc-band-box{border-top:1px solid var(--line);padding-top:10px;display:flex;flex-direction:column;gap:8px}.fc-member-admin{border-top:1px solid var(--line);padding-top:10px}.fc-member-head{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:8px}.fc-member-row{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line)}.fc-member-info{flex:1;min-width:0}.fc-member-info strong,.fc-member-info small{display:block;overflow-wrap:anywhere}.fc-member-info small{font-size:11px;color:var(--mut)}.fc-member-row select{width:47%;min-width:128px;padding:7px;font-size:12px}.fc-sync-panel code{font-size:10px;overflow-wrap:anywhere}.fc-sync-panel #fcProfileSelect{width:100%}.fc-sync-panel #fcCopyUid{font-size:11px;min-height:30px;padding:4px 8px}.fc-follow-row{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700}.fc-follow-row input{width:18px;min-height:18px;height:18px}.fc-live-banner{width:calc(100% - 24px);margin:0 12px 8px;text-align:left;background:rgba(22,139,88,.12);border-color:rgba(22,139,88,.35);color:var(--fg);font-size:13px;font-weight:850;display:flex;align-items:center;gap:8px}.fc-live-banner span:nth-child(2){flex:1}.fc-live-dot{width:9px;height:9px;border-radius:100%;background:#16a36a;display:inline-block}.fc-role-bar{padding:8px 12px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:var(--bg)}.fc-role-line{display:flex;align-items:center;justify-content:space-between;gap:7px;width:100%;font-size:12px}.fc-role-line button{font-size:12px;min-height:36px;padding:6px 9px}.fc-role-bar select{min-height:38px;font-size:13px}.fc-next-only{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px 18px;gap:12px;overflow:auto}.fc-next-chip{padding:6px 12px;border-radius:20px;background:var(--acc);color:var(--accfg);font-weight:900;font-size:12px}.fc-next-caption{font-size:11px;color:var(--mut);font-weight:900;letter-spacing:.12em}.fc-next-current{font-size:clamp(25px,6vw,38px);font-weight:900;line-height:1.1}.fc-next-title{font-size:clamp(28px,8vw,48px);font-weight:950;color:var(--acc);line-height:1.08}.fc-next-key{font-size:14px;color:var(--mut);font-weight:800}.fc-event-selected-row{display:block}.fc-event-song-head{display:flex;align-items:center;gap:7px}.fc-assignment-controls{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:7px 3px 2px 29px}.fc-assignment-controls label{font-size:10px;color:var(--mut);font-weight:800}.fc-assignment-controls select{display:block;min-height:35px;font-size:12px;padding:5px;margin-top:3px}.fc-live-song{background:rgba(22,139,88,.09);border-radius:10px;padding-left:8px;padding-right:8px}.fc-play-song{font-size:12px;padding:7px 9px;min-height:36px}' +

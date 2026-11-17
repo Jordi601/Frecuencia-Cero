@@ -1,4 +1,4 @@
-const CACHE_NAME = 'frecuencia-cero-shell-v22-chord-import-all-keys';
+const CACHE_NAME = 'frecuencia-cero-shell-v23-event-save-drag-sort';
 const APP_FILES = [
   './',
   './index.html',
