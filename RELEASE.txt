@@ -1,30 +1,27 @@
-FRECUENCIA CERO V21 — SINCRONIZACIÓN DEL CATÁLOGO DESDE DISPOSITIVO VINCULADO
+FRECUENCIA CERO V22 — IMPORTACIÓN ROBUSTA DE ACORDES Y CATÁLOGO DE TONALIDADES
 
-CAUSA CORREGIDA
-- En V20, el cliente permitía que un dispositivo QR vinculado al perfil propietario gestionara el catálogo, pero las reglas Firebase V17 no autorizaban la escritura de /catalog desde ese UID anónimo secundario.
-- Por ello, el guardado local podía parecer correcto mientras Firebase rechazaba la publicación y los demás dispositivos no recibían la canción.
+CAMBIOS PRINCIPALES
+- El procesador acepta acordes en renglones separados, incluso si se copian en negritas como **C** o **G7**.
+- Limpia caracteres invisibles, espacios no separables, espacios de ancho completo y etiquetas HTML comunes que algunas páginas insertan al copiar.
+- Convierte los renglones de acordes a marcas visibles [C], [G7] sobre la siguiente línea de letra.
+- El botón ahora se llama “Convertir acordes y detectar datos” y muestra cuántos acordes/renglones convirtió o por qué no detectó ninguno.
+- Amplía el selector a los 12 tonos mayores y 12 menores, con nombres en español y equivalencias internacionales.
+- Añade familias de acordes orientativas para las 24 tonalidades.
+- Conserva la selección Acordeón/Teclado, sincronización de catálogo, Firebase, QR, presencia, revocación y eventos de V21.
 
-CAMBIOS
-- Reglas: /catalog permite escribir al UID propietario o a un dispositivo cuyo registro vigente en /devices/<auth.uid> tenga memberUid igual al UID propietario, y mientras el perfil propietario exista con role accordionist e isOwner=true.
-- Revocar el registro del dispositivo elimina automáticamente este permiso.
-- El cliente publica el catálogo mediante una cola para respetar el orden de guardados.
-- El cliente solo marca el catálogo como sincronizado después de recibir confirmación de Firebase.
-- Ante PERMISSION_DENIED muestra un aviso explícito en lugar de aparentar sincronización.
-- El selector de bloque Acordeón/Teclado y la vista en dos bloques de V20 se conservan.
-- Versión y caché actualizadas a V21.
+CÓMO USAR LA IMPORTACIÓN
+1. Pega la letra en el campo “Letra con acordes”.
+2. Si los acordes aparecen en líneas separadas, como **C** y luego la frase, pulsa “Convertir acordes y detectar datos”.
+3. Comprueba que el texto cambie a marcas como [C]Yo tengo... y [G7]Que cuando...
+4. Selecciona tono mayor o menor y bloque Acordeón/Teclado.
+5. Guarda.
+
+NOTA MUSICAL
+- La conversión coloca los acordes separados al inicio de la siguiente línea o, si vienen alineados en columnas, aproxima la posición sobre la palabra más cercana.
+- Revisa la colocación antes de guardar. La detección no verifica que la armonía sea musicalmente correcta; convierte el formato de origen para que la app reconozca los acordes.
+- La lista de tonos contiene una representación común por cada una de las 12 alturas cromáticas.
 
 INSTALACIÓN
-1. Sube todos los archivos de este ZIP a la raíz del repositorio GitHub Pages.
-2. En Firebase Console > Realtime Database > Rules, publica el archivo RealtimeDB_Rules_V21.json incluido aquí.
-3. Actualiza iPhone y laptop desde Más > Buscar actualizaciones.
-
-IMPORTANTE
-- No modifica canciones, eventos, integrantes ni UID.
-- No abre la escritura general de la banda: la escritura del catálogo se concede solo al UID propietario y a dispositivos QR vigentes vinculados a ese propietario.
-- Antes de publicar, conserva una copia de las reglas actuales.
-
-PRUEBA
-1. En la laptop vinculada al Acordeonista, crea una canción de prueba.
-2. Selecciona un tono y el bloque Teclado.
-3. Guarda. Debe aparecer en Teclado > tono elegido en laptop e iPhone.
-4. En Más > Mi banda revisa el estado; debe indicar que el catálogo está sincronizado.
+- Sustituye los archivos del repositorio GitHub Pages con todos los archivos de este ZIP.
+- No requiere modificar las reglas de Firebase V21.
+- Actualiza iPhone y laptop desde Más > Buscar actualizaciones.
