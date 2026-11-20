@@ -1,29 +1,50 @@
-FRECUENCIA CERO V25 — ACTUALIZACIÓN DE ACCESO
+FRECUENCIA CERO V26 — SEGUIMIENTO POR VOZ Y EVENTOS EN VIVO
 
-ANTES DE PUBLICAR
-1. No borres datos de Safari ni de la app instalada. No cambies OWNER_UID ni bandId.
-2. Conserva las reglas V24 de Realtime Database si son las que tienes publicadas. V25 no requiere otro JSON de reglas.
-3. Comprueba que Authentication > Sign-in method > Anonymous sigue habilitado.
-4. Sube todos los archivos de este ZIP a la raíz de tu repositorio GitHub Pages y confirma en main.
-5. En cada dispositivo abre Más > Buscar actualizaciones.
+NOVEDADES
+- Seguimiento de letra por reconocimiento de voz en el dispositivo que dirige (Voz 1).
+- Reconocimiento en español de México (es-MX), con comparación de frases contra las líneas de la canción.
+- Botones de avance manual de línea como respaldo cuando el reconocimiento no esté disponible o escuche mal.
+- La voz inicia el micrófono desde el toque del usuario y después activa la posición compartida en Firebase; esto evita perder la activación de Safari/iOS por esperar una operación de red.
+- Mini reproductor rediseñado: canción actual, línea actual, canción siguiente, tono/instrumento y controles exclusivos de Voz 1 para anterior, pausar/reanudar y siguiente.
+- Lista en vivo: reordenar canciones con asa de tres líneas, agregar canciones del catálogo a la cola y quitar canciones futuras sin salir de la pantalla. La canción que está sonando no se puede quitar ni se interrumpe al reordenar.
+- Al cambiar la cola, se actualiza la vista de siguiente canción.
 
-CÓMO FUNCIONA EL ACCESO
-- URL pública: muestra selección de perfil. El visitante puede elegir su función y pulsar Solicitar incorporación. Elegir perfil NO concede acceso. El catálogo y eventos siguen bloqueados hasta que el propietario aprueba el UID de ese navegador.
-- Invitación general: el propietario la comparte; el invitado elige función y solicita incorporación.
-- Invitación con función: el propietario preselecciona una función. El invitado solicita incorporación y espera aprobación.
-- En iPhone, Safari y la app añadida a Inicio pueden tener UIDs distintos. Para que se autorice el UID de la PWA, instala primero, abre desde el icono y pega allí el enlace de invitación antes de solicitar.
-- Si la persona ya fue aprobada en Safari y luego instala la PWA, abre la app instalada y pega un enlace de dispositivo generado desde su propia sesión autorizada en Safari. Así la PWA se agrega al mismo perfil sin nueva aprobación. No uses el QR del Acordeonista para unirse como Voz 2: los QR siempre heredan el perfil desde el que se generaron.
-- QR / enlace de dispositivo: solamente agrega un navegador nuevo al perfil de la sesión que lo genera. Cualquier integrante autorizado puede generar uno desde su propio perfil. No crea integrantes nuevos y no requiere aprobación adicional.
+INSTALACIÓN
+1. Descomprime este ZIP.
+2. Sube todos los archivos a la raíz del repositorio GitHub Pages, reemplazando los anteriores.
+3. Haz Commit changes en main.
+4. En cada dispositivo autorizado entra a Más > Buscar actualizaciones.
+5. No borres los datos de Safari/PWA, no cambies el UID del propietario ni crees otra banda.
 
-PANTALLA MÁS
-- Mi perfil y estado de autorización.
-- Añadir otro dispositivo (solo aparece cuando este dispositivo ya está autorizado).
-- Invitar a un integrante nuevo (solo propietario).
-- Solicitudes pendientes e integrantes/dispositivos (solo propietario).
-- Los IDs técnicos están dentro de Información técnica.
+FIREBASE
+- No requiere publicar reglas nuevas si tu proyecto conserva las reglas V24 que ya utilizabas para miembros, eventos y posición en vivo.
+- Se conserva la banda frecuencia-cero-main y el UID propietario qZCvhHTK3MUhcABIlZlRyrqHKdC2.
+- Solo Voz 1 puede dirigir la canción y cambiar la canción en vivo. Los demás perfiles reciben las posiciones compartidas según sus permisos.
+- Las operaciones de cola utilizan el guardado de eventos existente; el servidor sigue siendo la fuente de confirmación.
 
-PRUEBA
-1. Abre la URL pública en incógnito: debe mostrar la selección de perfil y NO canciones.
-2. Elige Voz 2 y pulsa Solicitar incorporación. En el iPhone propietario debe aparecer la solicitud.
-3. Aprueba Voz 2 y comprueba que solo después se abre el catálogo.
-4. Desde una sesión ya autorizada como Voz 2, genera enlace de dispositivo y pégalo en la app PWA instalada de ese cantante si Safari y Home Screen tienen UID distinto.
+CÓMO PROBAR EL SEGUIMIENTO POR VOZ
+1. Entra con Voz 1 en un dispositivo que tenga micrófono y conexión a Internet.
+2. Abre el evento y selecciona la canción desde la lista.
+3. En el lector, pulsa “Iniciar seguimiento por voz” y concede permiso al micrófono.
+4. Canta la letra con claridad, dejando que el sistema compare las frases reconocidas con las líneas de la canción.
+5. Comprueba desde otro dispositivo que la línea resaltada/visible avance.
+6. Si el reconocimiento falla, usa “Línea anterior” y “Siguiente línea”.
+7. Para cambiar de canción utiliza el mini reproductor; el botón Siguiente actualiza a todos.
+
+PRIVACIDAD Y COMPATIBILIDAD
+- La aplicación no guarda ni publica el audio del micrófono en Firebase.
+- El reconocimiento nativo del navegador puede enviar el audio a un servicio de reconocimiento externo; depende del navegador y de su configuración.
+- SpeechRecognition tiene disponibilidad desigual entre navegadores. Safari/iOS utiliza la variante prefijada webkit en las versiones compatibles, pero debe probarse en el iPhone real y en la PWA instalada.
+- Si el navegador no soporta reconocimiento, deniega el micrófono o pierde la red, el avance manual sigue disponible.
+- Al mandar la app a segundo plano, se detiene la escucha para no dejar el micrófono abierto. Al volver, el director puede reactivarla.
+- La app no ofrece aún reconocimiento musical de melodía, tempo ni compases. El avance por voz se basa en comparar palabras reconocidas con la letra.
+
+LISTA EN VIVO
+- En la lista del evento, deja el filtro “Todas” activo para reordenar la cola completa.
+- Arrastra desde el asa de tres líneas. En mouse, mantén pulsado el asa izquierda; en móvil, mantén pulsado y arrastra.
+- “Añadir” incorpora canciones del catálogo al final de la cola.
+- No se puede quitar la canción actual; avanza primero a otra canción.
+- Solo el propietario técnico o Voz 1 pueden administrar el repertorio en vivo.
+
+VALIDACIÓN
+Se debe probar después de publicar en GitHub: (a) micrófono en Safari iPhone, (b) PWA instalada iPhone, (c) laptop con Chrome/Edge, (d) sincronización de línea y canción siguiente, (e) reordenar y guardar cola en Firebase. El paquete no puede sustituir esa prueba con dispositivos físicos.

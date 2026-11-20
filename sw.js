@@ -1,8 +1,8 @@
-const CACHE_NAME = 'frecuencia-cero-shell-v25-onboarding-invite-device-roles';
+const CACHE_NAME = 'frecuencia-cero-shell-v26-voice-follow-live-queue';
 const APP_FILES = [
   './',
   './index.html',
-  './fc-sync.js?v=25',
+  './fc-sync.js?v=26',
   './manifest.webmanifest',
   './icon-192.png',
   './icon-512.png',

@@ -4,7 +4,7 @@
 (function () {
   'use strict';
 
-  var APP_VERSION = 'V25';
+  var APP_VERSION = 'V26';
   var CFG_KEY = 'fc_firebase_config_v1';
   var BAND_KEY = 'fc_band_id_v1';
   var PROFILE_KEY = 'fc_device_profile_v1';
@@ -109,6 +109,19 @@
   var ownerLocalMigrationPrompted = false;
   var currentMemberInviteLink = '';
   var accessLinkProcessing = false;
+  // Seguimiento por voz: el micrófono solo se activa tras una acción explícita de Voz 1.
+  var speechRecognition = null;
+  var speechWanted = false;
+  var speechRestartTimer = null;
+  var speechCursor = -1;
+  var speechCandidate = -1;
+  var speechCandidateHits = 0;
+  var speechStatus = 'Listo. Inicia el micrófono cuando comience la canción.';
+  var speechResumeAfterPause = false;
+  var speechLastTranscript = '';
+  var playlistDragState = null;
+  var queueAddOpen = false;
+  var queueSearchText = '';
 
   function $(id) { return document.getElementById(id); }
   function safeJson(value) { try { return JSON.stringify(value); } catch (e) { return '{}'; } }
@@ -1533,6 +1546,13 @@
     setText('fcRoleDescription', roleName(memberRole) + (instrument ? ' · ' + (instrument === 'guitar' ? 'Guitarra' : instrument === 'accordion' ? 'Acordeón' : 'Teclado') : ''));
     var followBtn = $('fcFollowToggle');
     if (followBtn) { followBtn.style.display = (memberRole === 'voice1') ? 'none' : ''; followBtn.textContent = followDirector && !browseOverride ? 'Siguiendo director' : 'Vista libre'; }
+    var directorBtn = $('fcDirectorButton');
+    if (directorBtn) directorBtn.style.display = memberRole === 'voice1' ? '' : 'none';
+    var legacyAutoScroll = $('play');
+    // Cuando el navegador ofrece seguimiento por voz, evitamos tener dos motores
+    // de desplazamiento compitiendo. Si no hay API, el auto-scroll clásico queda como respaldo.
+    if (legacyAutoScroll) legacyAutoScroll.style.display = memberRole === 'voice1' && speechApiConstructor() ? 'none' : '';
+    renderVoiceFollowPanel();
     var select = $('fcInstrumentSelect');
     if (!select) return;
     var musicianRole = memberRole === 'accordionist' || memberRole === 'keyboardist';
@@ -1584,15 +1604,27 @@
     setText('fcMiniProgressText', current + '/' + Math.max(1, lines.length));
     var modeLabel = memberRole === 'voice1' ? 'DIRECTOR' : (!followDirector || browseOverride ? 'VISTA LIBRE' : 'EN SINCRONÍA');
     setText('fcMiniMode', modeLabel);
+    var index = (ev.songIds || []).indexOf(liveState.songId);
+    var nextSong = index >= 0 && index + 1 < ev.songIds.length ? window.find(ev.songIds[index + 1]) : null;
+    var previousSong = index > 0 ? window.find(ev.songIds[index - 1]) : null;
+    setText('fcMiniNextSong', nextSong ? nextSong.title : 'Fin del repertorio');
+    setText('fcMiniNextMeta', nextSong ? ((getSongSection(nextSong.id, ev) === 'keyboard' ? 'Teclado' : 'Acordeón') + (nextSong.key ? ' · Tono ' + displayKeyName(nextSong.key) : '')) : 'No hay otra canción en la cola');
     var action = $('fcMiniReturn');
     if (action) {
       action.textContent = memberRole === 'voice1' ? 'Abrir' : (!followDirector || browseOverride ? 'Volver a sincronía' : 'Ver en vivo');
       action.style.display = '';
     }
+    var director = memberRole === 'voice1';
+    ['fcMiniPrev','fcMiniPause','fcMiniNext'].forEach(function (id) { var b = $(id); if (b) b.style.display = director ? '' : 'none'; });
+    var prevBtn = $('fcMiniPrev'); if (prevBtn) prevBtn.disabled = !previousSong;
+    var nextBtn = $('fcMiniNext'); if (nextBtn) nextBtn.disabled = !nextSong;
+    var pauseBtn = $('fcMiniPause');
+    if (pauseBtn) { pauseBtn.textContent = liveState.paused ? '▶ Reanudar' : 'Ⅱ Pausar'; pauseBtn.setAttribute('aria-pressed', liveState.paused ? 'true' : 'false'); }
     var paused = !!liveState.paused;
-    setText('fcMiniState', paused ? 'En pausa' : 'Avanzando');
+    setText('fcMiniState', paused ? 'En pausa' : (speechWanted ? 'Voz activa' : 'En vivo'));
     mini.classList.toggle('is-free', memberRole !== 'voice1' && (!followDirector || browseOverride));
     mini.classList.toggle('is-paused', paused);
+    var queueBtn = $('fcMiniQueue'); if (queueBtn) queueBtn.style.display = ev ? '' : 'none';
   }
   function renderLiveBanner() {
     var banner = $('fcLiveBanner');
@@ -1621,8 +1653,14 @@
     if (!target) return;
     Array.prototype.forEach.call($('rt').querySelectorAll('[data-line-index]'), function (el) { el.classList.toggle('fc-live-row-current', el === target); });
     var rd = $('rd'), r = target.getBoundingClientRect(), container = rd.getBoundingClientRect();
-    var top = rd.scrollTop + (r.top - container.top) - Math.max(25, rd.clientHeight * .28);
-    rd.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+    var relativeTop = r.top - container.top;
+    var preferredTop = Math.max(38, rd.clientHeight * .28);
+    // No reinicia la animación si la línea ya está en la zona cómoda de lectura.
+    if (relativeTop < preferredTop - 24 || relativeTop > rd.clientHeight * .72) {
+      var top = rd.scrollTop + relativeTop - preferredTop;
+      var maxTop = Math.max(0, rd.scrollHeight - rd.clientHeight);
+      rd.scrollTo({ top: Math.max(0, Math.min(maxTop, top)), behavior: 'smooth' });
+    }
   }
   function handleLiveUpdate() {
     if (!liveState || !liveState.eventId || !liveState.songId) { renderLiveBanner(); return; }
@@ -1657,6 +1695,7 @@
       liveState = Object.assign({}, payload, { changedAt: Date.now() });
       window.currentEventId = eventId; lastHandledSong = eventId + ':' + songId; lastRemotePositionKey = '';
       lastPublishedPositionKey = '';
+      speechCursor = -1; speechCandidate = -1; speechCandidateHits = 0; speechLastTranscript = '';
       renderEventPlaylist(); renderLiveBanner();
     } catch (err) { setStatus('No se pudo actualizar la canción en vivo: ' + err.message, 'error'); }
   }
@@ -1701,6 +1740,357 @@
     window.requestAnimationFrame(function () { applyLivePosition(); renderMiniPlayer(); });
     renderMiniPlayer();
   }
+  // --- Seguimiento por voz (Voz 1) -----------------------------------------
+  var SPEECH_STOP_WORDS = new Set('a al algo como con cual cuando de del desde donde el ella ellas ellos en entre era es esa ese eso esta estaba este esto fue ha hay la las le les lo los me mi mis muy ni no nos o para pero por que se sin su sus te tengo tu un una uno y ya yo'.split(' '));
+  function speechApiConstructor() { return window.SpeechRecognition || window.webkitSpeechRecognition || null; }
+  function normalizeSpeechTokens(text) {
+    return String(text || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(function (token) { return token && !SPEECH_STOP_WORDS.has(token); });
+  }
+  function getSpeechLines(song) {
+    song = song || window.cur;
+    if (!song) return [];
+    return String(song.text || '').split(/\r?\n/).map(function (raw, index) {
+      var line = String(raw || '').replace(/^\s*##\s*/, '').replace(/\[[^\]]+\]/g, ' ').replace(/\*\*/g, '').replace(/\s+/g, ' ').trim();
+      if (!line || /^##/.test(raw)) return null;
+      // Omite líneas que contienen únicamente acordes escritos sin letra.
+      if (/^(?:[A-G](?:#|b)?(?:m|maj|min|dim|aug|sus\d?|add\d?|M|7|9|11|13|°|ø)?(?:\/[A-G](?:#|b)?)?\s*)+$/i.test(line)) return null;
+      var tokens = normalizeSpeechTokens(line);
+      if (tokens.length < 2) return null;
+      return { rowIndex: index, text: line, tokens: tokens };
+    }).filter(Boolean);
+  }
+  function speechLineScore(targetTokens, heardTokens) {
+    if (!targetTokens.length || !heardTokens.length) return { score: 0, hits: 0 };
+    var heardSet = new Set(heardTokens);
+    var targetUnique = Array.from(new Set(targetTokens));
+    var hits = targetUnique.filter(function (word) { return heardSet.has(word); }).length;
+    var coverage = hits / Math.max(1, targetUnique.length);
+    // Mayor subsecuencia contigua para conservar el orden de las palabras.
+    var longest = 0;
+    for (var i = 0; i < targetTokens.length; i++) {
+      for (var j = 0; j < heardTokens.length; j++) {
+        var n = 0;
+        while (i + n < targetTokens.length && j + n < heardTokens.length && targetTokens[i + n] === heardTokens[j + n]) n++;
+        if (n > longest) longest = n;
+      }
+    }
+    var sequence = longest / Math.max(1, Math.min(4, targetUnique.length));
+    return { score: Math.min(1, coverage * .66 + sequence * .34), hits: hits };
+  }
+  function setSpeechStatus(message, kind) {
+    speechStatus = message;
+    var status = $('fcVoiceStatus');
+    if (status) { status.textContent = message; status.dataset.kind = kind || 'neutral'; }
+    var start = $('fcVoiceStart'), stop = $('fcVoiceStop');
+    if (start) { start.disabled = !!speechWanted; start.textContent = speechWanted ? 'Micrófono activo' : '🎤 Iniciar seguimiento por voz'; }
+    if (stop) stop.disabled = !speechWanted;
+    var panel = $('fcVoiceFollowPanel');
+    if (panel) panel.classList.toggle('is-listening', !!speechWanted);
+  }
+  function renderVoiceFollowPanel() {
+    var panel = $('fcVoiceFollowPanel');
+    if (!panel) return;
+    var eligible = isConnected() && memberRole === 'voice1' && !!window.cur && $('vr') && $('vr').classList.contains('on');
+    panel.style.display = eligible ? '' : 'none';
+    if (!eligible) return;
+    var supported = !!speechApiConstructor();
+    var support = $('fcVoiceSupport');
+    if (support) support.textContent = supported
+      ? 'El navegador solicitará permiso de micrófono. El audio no se guarda en tu Firebase; el servicio de reconocimiento del navegador puede procesarlo fuera del dispositivo.'
+      : 'Este navegador no ofrece reconocimiento de voz. Puedes seguir usando los botones de avance manual.';
+    var start = $('fcVoiceStart');
+    if (start) { start.disabled = speechWanted || !supported; start.textContent = speechWanted ? 'Micrófono activo' : '🎤 Iniciar seguimiento por voz'; }
+    var stop = $('fcVoiceStop'); if (stop) stop.disabled = !speechWanted;
+    var mic = $('fcVoiceMicState'); if (mic) mic.textContent = speechWanted ? 'ESCUCHANDO' : 'MICRÓFONO INACTIVO';
+    setSpeechStatus(speechStatus, speechWanted ? 'success' : 'neutral');
+  }
+  function scrollDirectorToRow(rowIndex) {
+    if (!$('rt') || !$('rd')) return;
+    var target = $('rt').querySelector('[data-line-index="' + Number(rowIndex) + '"]');
+    if (!target) return;
+    Array.prototype.forEach.call($('rt').querySelectorAll('[data-line-index]'), function (el) { el.classList.toggle('fc-live-row-current', el === target); });
+    var rd = $('rd'), r = target.getBoundingClientRect(), container = rd.getBoundingClientRect();
+    var top = rd.scrollTop + (r.top - container.top) - Math.max(35, rd.clientHeight * .28);
+    rd.scrollTo({ top: Math.max(0, Math.min(Math.max(0, rd.scrollHeight - rd.clientHeight), top)), behavior: 'smooth' });
+  }
+  function tryMatchSpeech(transcript, isFinal) {
+    if (memberRole !== 'voice1' || !window.cur || !liveState || liveState.songId !== window.cur.id || liveState.paused) return;
+    var lines = getSpeechLines(window.cur);
+    if (!lines.length) return;
+    var currentRow = Number(liveState.rowIndex) || 0;
+    var base = speechCursor >= 0 ? speechCursor + 1 : lines.findIndex(function (line) { return line.rowIndex >= currentRow; });
+    if (base < 0) base = 0;
+    var heard = normalizeSpeechTokens(transcript).slice(-34);
+    if (heard.length < 3) return;
+    var best = null;
+    var limit = Math.min(lines.length - 1, base + 3);
+    // Busca en orden desde la siguiente línea esperada. Así no salta al final
+    // aunque el motor entregue varias frases anteriores en el mismo resultado.
+    for (var i = base; i <= limit; i++) {
+      var result = speechLineScore(lines[i].tokens, heard);
+      var offset = i - base;
+      var threshold = offset === 0 ? .58 : offset === 1 ? .73 : .84;
+      var minimumHits = Math.min(2, new Set(lines[i].tokens).size);
+      if (result.hits < minimumHits || result.score < threshold) continue;
+      best = { index: i, line: lines[i], score: result.score, hits: result.hits };
+      break;
+    }
+    if (!best) { speechCandidate = -1; speechCandidateHits = 0; return; }
+    if (speechCandidate === best.index) speechCandidateHits++;
+    else { speechCandidate = best.index; speechCandidateHits = 1; }
+    // Requiere una frase final o dos resultados estables antes de mover la letra.
+    var stable = isFinal || speechCandidateHits >= 2;
+    if (!stable) return;
+    speechCursor = best.index;
+    speechCandidate = -1; speechCandidateHits = 0;
+    if (Number(liveState.rowIndex) === best.line.rowIndex) return;
+    publishLivePosition(best.line.rowIndex, -1, false);
+    scrollDirectorToRow(best.line.rowIndex);
+    setSpeechStatus('Reconocido: “' + best.line.text.slice(0, 58) + (best.line.text.length > 58 ? '…' : '') + '”', 'success');
+  }
+  function onSpeechResult(event) {
+    if (!speechWanted) return;
+    var parts = [], finalResult = false;
+    var first = Math.max(Number(event.resultIndex) || 0, event.results.length - 2);
+    for (var i = first; i < event.results.length; i++) {
+      var result = event.results[i];
+      if (result && result[0] && result[0].transcript) parts.push(result[0].transcript);
+      if (i >= (event.resultIndex || 0) && result && result.isFinal) finalResult = true;
+    }
+    var transcript = parts.join(' ').trim();
+    if (!transcript || transcript === speechLastTranscript) return;
+    speechLastTranscript = transcript;
+    tryMatchSpeech(transcript, finalResult);
+  }
+  function startSpeechInstance() {
+    if (!speechWanted || document.visibilityState === 'hidden') return;
+    var Ctor = speechApiConstructor();
+    if (!Ctor) { speechWanted = false; setSpeechStatus('Reconocimiento de voz no disponible en este navegador. Usa avance manual.', 'warning'); return; }
+    try {
+      var recognition = new Ctor();
+      speechRecognition = recognition;
+      recognition.lang = 'es-MX';
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.maxAlternatives = 3;
+      recognition.onstart = function () { if (speechRecognition === recognition) setSpeechStatus('Micrófono activo. Sigue cantando; la letra avanzará al reconocer cada frase.', 'success'); };
+      recognition.onresult = function (event) { if (speechRecognition === recognition) onSpeechResult(event); };
+      recognition.onerror = function (event) {
+        if (speechRecognition !== recognition) return;
+        var code = event && event.error || 'unknown';
+        if (code === 'not-allowed' || code === 'service-not-allowed' || code === 'audio-capture') {
+          speechWanted = false;
+          setSpeechStatus(code === 'audio-capture' ? 'No se encontró un micrófono disponible.' : 'Permiso de micrófono denegado. Actívalo en los ajustes del navegador.', 'error');
+        } else if (code === 'network') {
+          setSpeechStatus('El servicio de reconocimiento perdió conexión. Intentando reanudar…', 'warning');
+        } else if (code !== 'no-speech' && code !== 'aborted') {
+          setSpeechStatus('Reconocimiento interrumpido (' + code + '). Puedes usar el avance manual.', 'warning');
+        }
+      };
+      recognition.onend = function () {
+        if (speechRecognition === recognition) speechRecognition = null;
+        if (!speechWanted || document.visibilityState === 'hidden') return;
+        setSpeechStatus('Reanudando escucha…', 'neutral');
+        if (speechRestartTimer) clearTimeout(speechRestartTimer);
+        speechRestartTimer = setTimeout(startSpeechInstance, 850);
+      };
+      recognition.start();
+    } catch (err) {
+      speechRecognition = null;
+      if (speechWanted) {
+        setSpeechStatus('No se pudo iniciar el micrófono: ' + (err && err.message ? err.message : 'revisa el permiso del navegador.'), 'error');
+        speechWanted = false;
+      }
+    }
+  }
+  async function startSpeechFollow() {
+    if (memberRole !== 'voice1' || !isConnected()) { setSpeechStatus('Solo Voz 1 puede activar el seguimiento por voz.', 'warning'); return; }
+    if (!speechApiConstructor()) { setSpeechStatus('Tu navegador no admite reconocimiento de voz. Usa el avance manual.', 'warning'); return; }
+    if (!window.cur) { setSpeechStatus('Abre primero una canción del evento.', 'warning'); return; }
+    var ev = getCurrentEvent();
+    if (!ev || !ev.songIds || ev.songIds.indexOf(window.cur.id) < 0) { setSpeechStatus('Abre la canción desde el repertorio de un evento para sincronizarla.', 'warning'); return; }
+
+    // Inicia SpeechRecognition directamente desde el clic del usuario. Safari/iOS
+    // puede exigir activación de usuario para mostrar el permiso del micrófono;
+    // no debemos esperar una escritura Firebase antes de llamar recognition.start().
+    if (window.stopAll) window.stopAll();
+    speechCursor = -1; speechCandidate = -1; speechCandidateHits = 0; speechLastTranscript = '';
+    speechWanted = true;
+    renderVoiceFollowPanel();
+    setSpeechStatus('Solicitando permiso de micrófono…', 'neutral');
+    startSpeechInstance();
+
+    if (!liveState || liveState.eventId !== ev.id || liveState.songId !== window.cur.id) {
+      await setLiveSong(ev.id, window.cur.id, ev.songIds.indexOf(window.cur.id));
+    }
+    if (!liveState || liveState.eventId !== ev.id || liveState.songId !== window.cur.id) {
+      stopSpeechFollow('No se pudo poner esta canción en vivo. Comprueba la conexión y vuelve a intentarlo.', false);
+      return;
+    }
+    // setLiveSong crea la nueva canción en pausa. Activamos el estado compartido
+    // antes de procesar la primera frase para que el comparador no descarte voz.
+    publishLivePosition(Number(liveState.rowIndex) || 0, Number(liveState.chordIndex) || -1, false);
+    renderMiniPlayer();
+  }
+  function stopSpeechFollow(message, preserveForResume) {
+    if (speechRestartTimer) { clearTimeout(speechRestartTimer); speechRestartTimer = null; }
+    if (preserveForResume) speechResumeAfterPause = speechWanted;
+    else speechResumeAfterPause = false;
+    speechWanted = false;
+    var rec = speechRecognition; speechRecognition = null;
+    if (rec) { try { rec.onend = null; rec.onerror = null; rec.onresult = null; rec.stop(); } catch (e) { try { rec.abort(); } catch (e2) {} } }
+    setSpeechStatus(message || 'Micrófono apagado.', 'neutral');
+  }
+  function advanceDirectorLine(delta) {
+    if (memberRole !== 'voice1' || !window.cur || !liveState || liveState.songId !== window.cur.id) return;
+    var lines = getSpeechLines(window.cur); if (!lines.length) return;
+    var raw = Number(liveState.rowIndex) || 0;
+    var current = speechCursor;
+    if (current < 0) current = lines.findIndex(function (line) { return line.rowIndex >= raw; });
+    if (current < 0) current = 0;
+    var target = Math.max(0, Math.min(lines.length - 1, current + delta));
+    speechCursor = target; speechCandidate = -1; speechCandidateHits = 0;
+    publishLivePosition(lines[target].rowIndex, -1, false);
+    scrollDirectorToRow(lines[target].rowIndex);
+    setSpeechStatus('Posición manual: línea ' + (target + 1) + ' de ' + lines.length + '.', 'neutral');
+  }
+  function toggleLivePause() {
+    if (memberRole !== 'voice1' || !liveState) return;
+    if (!liveState.paused) {
+      stopSpeechFollow('Reproducción en pausa.', true);
+      if (window.stopAll) window.stopAll();
+      publishLivePosition(Number(liveState.rowIndex) || 0, Number(liveState.chordIndex) || -1, true);
+    } else {
+      publishLivePosition(Number(liveState.rowIndex) || 0, Number(liveState.chordIndex) || -1, false);
+      if (speechResumeAfterPause) { speechResumeAfterPause = false; startSpeechFollow(); }
+    }
+    renderMiniPlayer();
+  }
+  async function navigateLiveSong(offset) {
+    if (memberRole !== 'voice1' || !liveState || !liveState.eventId) return;
+    var ev = (window.events || []).find(function (item) { return item.id === liveState.eventId; });
+    if (!ev || !Array.isArray(ev.songIds)) return;
+    var index = ev.songIds.indexOf(liveState.songId), nextIndex = index + offset;
+    if (index < 0 || nextIndex < 0 || nextIndex >= ev.songIds.length) { setStatus(offset > 0 ? 'Ya estás al final del repertorio.' : 'Ya estás al inicio del repertorio.', 'warning'); return; }
+    var nextId = ev.songIds[nextIndex];
+    var keepVoiceFollow = speechWanted;
+    await setLiveSong(ev.id, nextId, nextIndex);
+    window.currentEventId = ev.id;
+    window.openSong(nextId, 'vplaylist');
+    // Si Voz 1 estaba usando el micrófono, conserva el seguimiento al cambiar
+    // de canción; el nuevo tema arranca en la primera línea sin pedir otro toque.
+    if (keepVoiceFollow && speechWanted && liveState && liveState.songId === nextId) {
+      speechCursor = -1; speechCandidate = -1; speechCandidateHits = 0; speechLastTranscript = '';
+      publishLivePosition(0, -1, false);
+    }
+    renderMiniPlayer();
+  }
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'hidden' && speechWanted) stopSpeechFollow('Seguimiento por voz pausado al salir de la aplicación.', false);
+  });
+
+  // --- Cola del evento: editar y reordenar desde la lista en vivo -------------
+  function persistQueueMutation(ev, previousIds, successText) {
+    ev.updatedAt = Date.now();
+    window.saveEvents().then(function () {
+      window.renderEventPlaylist();
+      if (successText) setStatus(successText, 'success');
+    }).catch(function (err) {
+      ev.songIds = previousIds;
+      localSaveEvents();
+      window.renderEventPlaylist();
+      setStatus(err && err.message ? err.message : 'No se pudo guardar la cola del evento.', 'error');
+    });
+  }
+  function bindPlaylistDragHandle(handle, row, container, index, ev) {
+    handle.addEventListener('pointerdown', function (event) {
+      if (event.pointerType === 'mouse' && event.button !== 0) return;
+      event.preventDefault();
+      playlistDragState = { pointerId: event.pointerId, from: index, to: index, row: row, container: container, handle: handle, eventId: ev.id };
+      row.classList.add('is-drag-source'); handle.classList.add('is-dragging');
+      try { handle.setPointerCapture(event.pointerId); } catch (e) {}
+    });
+    handle.addEventListener('pointermove', function (event) {
+      if (!playlistDragState || playlistDragState.pointerId !== event.pointerId) return;
+      var under = document.elementFromPoint(event.clientX, event.clientY);
+      var target = under && under.closest ? under.closest('.fc-live-queue-row') : null;
+      if (!target || !container.contains(target)) return;
+      var targetIndex = Number(target.dataset.index);
+      if (!Number.isFinite(targetIndex)) return;
+      playlistDragState.to = targetIndex;
+      Array.prototype.forEach.call(container.querySelectorAll('.fc-live-queue-row'), function (item) { item.classList.toggle('is-drop-target', item === target && targetIndex !== playlistDragState.from); });
+    });
+    function finish(event) {
+      if (!playlistDragState || playlistDragState.pointerId !== event.pointerId) return;
+      var state = playlistDragState; playlistDragState = null;
+      if (state.handle) state.handle.classList.remove('is-dragging');
+      if (state.row) state.row.classList.remove('is-drag-source');
+      Array.prototype.forEach.call(container.querySelectorAll('.fc-live-queue-row'), function (item) { item.classList.remove('is-drop-target'); });
+      var currentEvent = window.findEvent(state.eventId);
+      if (!currentEvent || state.to === state.from || state.to < 0 || state.to >= currentEvent.songIds.length) return;
+      var previous = currentEvent.songIds.slice();
+      var moved = currentEvent.songIds.splice(state.from, 1)[0];
+      currentEvent.songIds.splice(state.to, 0, moved);
+      persistQueueMutation(currentEvent, previous, 'Orden del repertorio actualizado. La canción que está sonando no se interrumpió.');
+    }
+    handle.addEventListener('pointerup', finish);
+    handle.addEventListener('pointercancel', finish);
+    handle.addEventListener('lostpointercapture', function (event) { if (playlistDragState && playlistDragState.pointerId === event.pointerId) finish(event); });
+    handle.addEventListener('keydown', function (event) {
+      if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+      event.preventDefault();
+      var currentEvent = window.findEvent(ev.id); if (!currentEvent) return;
+      var to = index + (event.key === 'ArrowUp' ? -1 : 1);
+      if (to < 0 || to >= currentEvent.songIds.length) return;
+      var previous = currentEvent.songIds.slice(), moved = currentEvent.songIds.splice(index, 1)[0];
+      currentEvent.songIds.splice(to, 0, moved); persistQueueMutation(currentEvent, previous, 'Orden actualizado.');
+    });
+  }
+  function ensureQueueTools() {
+    var list = $('playlistSongs'); if (!list) return null;
+    var tools = $('fcQueueTools');
+    if (!tools) {
+      tools = document.createElement('section'); tools.id = 'fcQueueTools'; tools.className = 'fc-queue-tools';
+      tools.innerHTML = '<div class="fc-queue-tools-head"><div><strong>Cola del evento</strong><small>Ordena y añade canciones sin salir de esta pantalla.</small></div><button type="button" id="fcQueueAddToggle" class="p">＋ Añadir</button></div><div id="fcQueueAddPanel" class="fc-queue-add-panel" hidden><input id="fcQueueSearch" type="search" placeholder="Buscar canción del catálogo…" aria-label="Buscar canción para agregar"><div id="fcQueueSearchResults" class="fc-queue-search-results"></div></div>';
+      list.parentNode.insertBefore(tools, list);
+    }
+    return tools;
+  }
+  function renderQueueSearch() {
+    var result = $('fcQueueSearchResults'), search = $('fcQueueSearch');
+    if (!result || !search) return;
+    result.innerHTML = '';
+    var ev = getCurrentEvent(); if (!ev) return;
+    var q = normalizeSpeechTokens(search.value).join(' ');
+    var existing = new Set(ev.songIds || []);
+    var found = (window.songs || []).filter(function (song) {
+      if (existing.has(song.id)) return false;
+      var haystack = (song.title || '') + ' ' + (song.key || '') + ' ' + (song.section === 'keyboard' ? 'teclado' : 'acordeon');
+      return !q || normalizeSpeechTokens(haystack).join(' ').includes(q);
+    }).slice(0, 30);
+    if (!found.length) { var empty = document.createElement('p'); empty.className = 'fc-inline-hint'; empty.textContent = 'No hay canciones disponibles con esa búsqueda.'; result.appendChild(empty); return; }
+    found.forEach(function (song) {
+      var row = document.createElement('div'); row.className = 'fc-queue-search-row';
+      var info = document.createElement('span'); info.textContent = song.title + ' · ' + (song.section === 'keyboard' ? 'Teclado' : 'Acordeón') + (song.key ? ' · ' + displayKeyName(song.key) : '');
+      var add = document.createElement('button'); add.type = 'button'; add.textContent = 'Agregar';
+      add.onclick = function () {
+        var currentEvent = getCurrentEvent(); if (!currentEvent || currentEvent.songIds.indexOf(song.id) >= 0) return;
+        var previous = currentEvent.songIds.slice(); currentEvent.songIds.push(song.id);
+        currentEvent.assignments = currentEvent.assignments || {};
+        if (!currentEvent.assignments[song.id]) currentEvent.assignments[song.id] = eventAssignmentDefaults(song.id);
+        persistQueueMutation(currentEvent, previous, 'Canción agregada al final de la cola.');
+      };
+      row.append(info, add); result.appendChild(row);
+    });
+  }
+  function removeSongFromLiveQueue(songId) {
+    var ev = getCurrentEvent(); if (!ev) return;
+    if (liveState && liveState.eventId === ev.id && liveState.songId === songId) { alert('No puedes quitar la canción que está sonando. Primero avanza a otra canción o detén el evento.'); return; }
+    var previous = ev.songIds.slice(); ev.songIds = ev.songIds.filter(function (id) { return id !== songId; });
+    if (ev.assignments) delete ev.assignments[songId];
+    persistQueueMutation(ev, previous, 'Canción retirada de la cola.');
+  }
+
   function updateMemberPresence() {
     Object.keys(memberList || {}).forEach(function (uid) {
       var online = !!(presenceMap[uid] && presenceMap[uid].online);
@@ -1787,6 +2177,9 @@
   };
   window.openSong = function (id, backTo) {
     if (!isConnected() || accessRevoked || accessVerificationPending) { maybeShowFirstProfileGate(); return; }
+    if (!openingFromLive && memberRole === 'voice1' && speechWanted && liveState && id !== liveState.songId) {
+      stopSpeechFollow('Seguimiento por voz detenido al abrir una canción fuera de la canción en vivo.', false);
+    }
     if (!openingFromLive && memberRole !== 'voice1' && liveState && liveState.songId) {
       if (id !== liveState.songId) browseOverride = true;
       else browseOverride = false;
@@ -1987,30 +2380,66 @@
       button.onclick = function () { window.fcPlaylistCategoryFilter = item[0]; window.renderEventPlaylist(); };
       filters.appendChild(button);
     });
+    var tools = ensureQueueTools();
+    if (tools) {
+      var canEditQueue = isConnected() && canManageEvents();
+      tools.style.display = canEditQueue ? '' : 'none';
+      var toggle = $('fcQueueAddToggle'), panel = $('fcQueueAddPanel'), search = $('fcQueueSearch');
+      if (toggle) toggle.onclick = function () { queueAddOpen = !queueAddOpen; if (panel) panel.hidden = !queueAddOpen; if (queueAddOpen && search) { renderQueueSearch(); search.focus(); } };
+      if (panel) panel.hidden = !queueAddOpen;
+      if (search) { search.oninput = renderQueueSearch; if (queueAddOpen) renderQueueSearch(); }
+    }
     l.innerHTML = '';
-    if (!ev.songIds || !ev.songIds.length) { var empty = document.createElement('div'); empty.className = 'playlist-empty'; empty.textContent = 'Esta carpeta todavía no tiene canciones.'; l.appendChild(empty); return; }
-    var visibleCount = 0;
+    if (!ev.songIds || !ev.songIds.length) { var empty = document.createElement('div'); empty.className = 'playlist-empty'; empty.textContent = 'Esta carpeta todavía no tiene canciones. Usa Añadir para agregarlas desde el catálogo.'; l.appendChild(empty); renderMiniPlayer(); return; }
+    var visibleCount = 0, currentIndex = liveState && liveState.eventId === ev.id ? ev.songIds.indexOf(liveState.songId) : -1;
+    if (activeFilter !== 'all' && isConnected() && canManageEvents()) {
+      var filterNote = document.createElement('p'); filterNote.className = 'fc-inline-hint'; filterNote.textContent = 'Para reordenar la cola completa, selecciona “Todas”.'; l.appendChild(filterNote);
+    }
     ev.songIds.forEach(function (id, i) {
       var section = getSongSection(id, ev);
       if (activeFilter !== 'all' && section !== activeFilter) return;
-      var s = window.find(id); if (!s) return;
+      var song = window.find(id); if (!song) return;
       visibleCount++;
-      var row = document.createElement('div'); row.className = 'playlist-song';
-      if (liveState && liveState.eventId === ev.id && liveState.songId === id) row.classList.add('fc-live-song');
-      var no = document.createElement('span'); no.className = 'playlist-number'; no.textContent = String(i + 1).padStart(2, '0');
+      var row = document.createElement('div'); row.className = 'playlist-song fc-live-queue-row'; row.dataset.index = String(i);
+      var isCurrent = currentIndex === i;
+      var isNext = currentIndex >= 0 && i === currentIndex + 1;
+      if (isCurrent) row.classList.add('fc-live-song');
+      var number = document.createElement('span'); number.className = 'playlist-number'; number.textContent = String(i + 1).padStart(2, '0');
+      var canEditQueue = isConnected() && canManageEvents();
+      if (canEditQueue && activeFilter === 'all') {
+        var handle = document.createElement('button'); handle.type = 'button'; handle.className = 'fc-live-queue-handle'; handle.textContent = '☰'; handle.title = 'Mantén pulsado y arrastra para reordenar'; handle.setAttribute('aria-label', 'Mover ' + song.title); row.appendChild(handle);
+        bindPlaylistDragHandle(handle, row, l, i, ev);
+      }
       var open = document.createElement('button'); open.className = 'playlist-open';
-      var title = document.createElement('strong'); title.textContent = s.title;
+      var title = document.createElement('strong'); title.textContent = song.title;
       var detail = document.createElement('small');
-      var assignment = ev.assignments && ev.assignments[id] || eventAssignmentDefaults();
       var instrumentForThisRole = memberRole === 'accordionist' ? getAssignment(id, 'accordionist') : memberRole === 'keyboardist' ? getAssignment(id, 'keyboardist') : '';
-      detail.textContent = (section === 'keyboard' ? 'TECLADO' : 'ACORDEÓN') + ' · ' + (s.key ? 'Tono ' + displayKeyName(s.key) : 'Sin tonalidad') + ' · ' + window.formatDuration(window.songDuration(s)) + ' aprox.' + (instrumentForThisRole ? ' · Tú: ' + (instrumentForThisRole === 'guitar' ? 'Guitarra / acordes' : instrumentForThisRole === 'accordion' ? 'Acordeón / letra en vivo' : 'Teclado / letra en vivo') : '');
-      open.append(title, detail); open.onclick = function () { window.openSong(s.id, 'vplaylist'); };
-      row.append(no, open);
-      if (isConnected() && memberRole === 'voice1' && db && bandId) { var play = document.createElement('button'); play.className = 'p fc-play-song'; play.textContent = (liveState && liveState.songId === id && liveState.eventId === ev.id) ? 'En curso' : '▶ Tocar'; play.disabled = liveState && liveState.songId === id && liveState.eventId === ev.id; play.onclick = function () { setLiveSong(ev.id, s.id, i); window.openSong(s.id, 'vplaylist'); }; row.appendChild(play); }
+      detail.textContent = (section === 'keyboard' ? 'TECLADO' : 'ACORDEÓN') + ' · ' + (song.key ? 'Tono ' + displayKeyName(song.key) : 'Sin tonalidad') + ' · ' + window.formatDuration(window.songDuration(song)) + ' aprox.' + (instrumentForThisRole ? ' · Tú: ' + (instrumentForThisRole === 'guitar' ? 'Guitarra / acordes' : instrumentForThisRole === 'accordion' ? 'Acordeón / letra en vivo' : 'Teclado / letra en vivo') : '');
+      open.append(title, detail); open.onclick = function () { window.openSong(song.id, 'vplaylist'); };
+      row.append(number, open);
+      if (isCurrent) { var currentBadge = document.createElement('span'); currentBadge.className = 'fc-queue-badge current'; currentBadge.textContent = 'SONANDO'; row.appendChild(currentBadge); }
+      else if (isNext) { var nextBadge = document.createElement('span'); nextBadge.className = 'fc-queue-badge next'; nextBadge.textContent = 'SIGUIENTE'; row.appendChild(nextBadge); }
+      if (isConnected() && memberRole === 'voice1' && db && bandId) {
+        var play = document.createElement('button'); play.className = 'p fc-play-song'; play.textContent = isCurrent ? 'En curso' : '▶ Tocar'; play.disabled = isCurrent;
+        play.onclick = async function () {
+          var keepVoiceFollow = speechWanted;
+          await setLiveSong(ev.id, song.id, i);
+          window.openSong(song.id, 'vplaylist');
+          if (keepVoiceFollow && speechWanted && liveState && liveState.songId === song.id) {
+            speechCursor = -1; speechCandidate = -1; speechCandidateHits = 0; speechLastTranscript = '';
+            publishLivePosition(0, -1, false);
+          }
+          renderMiniPlayer();
+        };
+        row.appendChild(play);
+      }
+      if (canEditQueue) {
+        var remove = document.createElement('button'); remove.type = 'button'; remove.className = 'fc-queue-remove'; remove.textContent = '×'; remove.title = isCurrent ? 'La canción actual no se puede quitar' : 'Quitar de la cola'; remove.disabled = isCurrent; remove.onclick = function () { removeSongFromLiveQueue(song.id); }; row.appendChild(remove);
+      }
       l.appendChild(row);
     });
     if (!visibleCount) { var filteredEmpty = document.createElement('div'); filteredEmpty.className = 'playlist-empty'; filteredEmpty.textContent = 'No hay canciones en este bloque.'; l.appendChild(filteredEmpty); }
-    renderLiveBanner();
+    renderLiveBanner(); renderMiniPlayer();
   };
 
   function renderRoleCurrentNext() {
@@ -2160,7 +2589,7 @@
         return;
       }
       var registration = await navigator.serviceWorker.getRegistration('./');
-      if (!registration) registration = await navigator.serviceWorker.register('./sw.js?v=25');
+      if (!registration) registration = await navigator.serviceWorker.register('./sw.js?v=26');
       var controllerChanged = new Promise(function (resolve) {
         var finished = false;
         var finish = function () {
@@ -2337,7 +2766,7 @@
     }
     if (!$('fcMiniPlayer')) {
       var mini = document.createElement('aside'); mini.id = 'fcMiniPlayer'; mini.className = 'fc-mini-player'; mini.style.display = 'none';
-      mini.innerHTML = '<div class="fc-mini-top"><span class="fc-mini-live-dot"></span><span id="fcMiniMode">EN VIVO</span><span class="fc-mini-event" id="fcMiniEvent"></span><span class="fc-mini-state" id="fcMiniState"></span></div><div class="fc-mini-main"><div class="fc-mini-copy"><strong id="fcMiniSong">—</strong><span id="fcMiniLine">Esperando canción del director…</span></div><button type="button" id="fcMiniReturn">Volver a sincronía</button></div><div class="fc-mini-progress-track"><span id="fcMiniProgress"></span></div><span class="fc-mini-progress-text" id="fcMiniProgressText"></span>';
+      mini.innerHTML = '<div class="fc-mini-top"><span class="fc-mini-live-dot"></span><span id="fcMiniMode">EN VIVO</span><span class="fc-mini-event" id="fcMiniEvent"></span><span class="fc-mini-state" id="fcMiniState"></span></div><div class="fc-mini-main"><div class="fc-mini-copy"><strong id="fcMiniSong">—</strong><span id="fcMiniLine">Esperando canción del director…</span></div><button type="button" id="fcMiniReturn">Ver en vivo</button></div><div class="fc-mini-next"><span>SIGUIENTE</span><strong id="fcMiniNextSong">Fin del repertorio</strong><small id="fcMiniNextMeta"></small></div><div class="fc-mini-controls"><button type="button" id="fcMiniPrev" title="Canción anterior">⏮</button><button type="button" id="fcMiniPause" title="Pausar o reanudar">Ⅱ Pausar</button><button type="button" id="fcMiniNext" class="p" title="Siguiente canción">⏭ Siguiente</button><button type="button" id="fcMiniQueue" title="Abrir repertorio">☷ Lista</button></div><div class="fc-mini-progress-track"><span id="fcMiniProgress"></span></div><span class="fc-mini-progress-text" id="fcMiniProgressText"></span>';
       document.body.appendChild(mini);
     }
     var listView = $('vl');
@@ -2354,6 +2783,9 @@
       var panel = document.createElement('div'); panel.id = 'fcNextOnlyPanel'; panel.className = 'fc-next-only'; panel.style.display = 'none';
       panel.innerHTML = '<div class="fc-next-chip" id="fcRoleInstrumentName">Instrumento</div><div class="fc-next-caption">CANCIÓN ACTUAL</div><div class="fc-next-current" id="fcRoleCurrentSong">—</div><div class="fc-next-caption">SIGUIENTE CANCIÓN</div><div class="fc-next-title" id="fcRoleNextSong">—</div><div class="fc-next-key" id="fcRoleCurrentKey"></div><p class="note">Tu pantalla está siguiendo el repertorio del evento. Cambia tu instrumento arriba si hoy te toca guitarra.</p>';
       reader.insertBefore(panel, $('rd'));
+      var voicePanel = document.createElement('section'); voicePanel.id = 'fcVoiceFollowPanel'; voicePanel.className = 'fc-voice-panel'; voicePanel.style.display = 'none';
+      voicePanel.innerHTML = '<div class="fc-voice-panel-head"><div><strong>Seguimiento automático por voz</strong><small id="fcVoiceMicState">MICRÓFONO INACTIVO</small></div><span class="fc-voice-indicator" aria-hidden="true">🎤</span></div><p id="fcVoiceStatus" class="fc-voice-status" aria-live="polite">Listo. Inicia el micrófono cuando comience la canción.</p><div class="fc-voice-actions"><button type="button" id="fcVoiceStart" class="p">🎤 Iniciar seguimiento por voz</button><button type="button" id="fcVoiceStop" disabled>Detener</button></div><div class="fc-voice-manual"><button type="button" id="fcVoicePrevLine">↑ Línea anterior</button><button type="button" id="fcVoiceNextLine">↓ Siguiente línea</button></div><p id="fcVoiceSupport" class="fc-inline-hint">El navegador solicitará permiso de micrófono.</p>';
+      reader.insertBefore(voicePanel, $('rd'));
     }
   }
 
@@ -2394,6 +2826,14 @@
     };
     profileButtonActions();
     if ($('fcMiniReturn')) $('fcMiniReturn').onclick = returnToLive;
+    if ($('fcMiniPrev')) $('fcMiniPrev').onclick = function () { navigateLiveSong(-1); };
+    if ($('fcMiniNext')) $('fcMiniNext').onclick = function () { navigateLiveSong(1); };
+    if ($('fcMiniPause')) $('fcMiniPause').onclick = toggleLivePause;
+    if ($('fcMiniQueue')) $('fcMiniQueue').onclick = function () { if (liveState && liveState.eventId) window.openEvent(liveState.eventId); };
+    if ($('fcVoiceStart')) $('fcVoiceStart').onclick = startSpeechFollow;
+    if ($('fcVoiceStop')) $('fcVoiceStop').onclick = function () { stopSpeechFollow('Micrófono apagado. El avance manual sigue disponible.', false); };
+    if ($('fcVoicePrevLine')) $('fcVoicePrevLine').onclick = function () { advanceDirectorLine(-1); };
+    if ($('fcVoiceNextLine')) $('fcVoiceNextLine').onclick = function () { advanceDirectorLine(1); };
     if ($('rd') && !$('rd').dataset.fcLiveScrollBound) {
       $('rd').dataset.fcLiveScrollBound = '1';
       $('rd').addEventListener('scroll', function () {
@@ -2414,6 +2854,8 @@
 
   function addStyles() {
     var css = '' +
+      '.fc-voice-panel{margin:0 10px 8px;padding:12px;border:1px solid color-mix(in srgb,var(--acc) 30%,var(--line));border-radius:14px;background:color-mix(in srgb,var(--acc) 5%,var(--card));display:flex;flex-direction:column;gap:8px}.fc-voice-panel-head{display:flex;align-items:center;justify-content:space-between;gap:8px}.fc-voice-panel-head>div{display:flex;flex-direction:column;gap:3px}.fc-voice-panel-head strong{font-size:13px}.fc-voice-panel-head small{font-size:9px;letter-spacing:.1em;font-weight:900;color:var(--mut)}.fc-voice-indicator{display:grid;place-items:center;width:34px;height:34px;border-radius:11px;background:var(--bg);font-size:18px}.fc-voice-panel.is-listening .fc-voice-indicator{background:rgba(22,163,106,.12);box-shadow:0 0 0 4px rgba(22,163,106,.06)}.fc-voice-status{margin:0;padding:8px 10px;border-radius:9px;background:var(--bg);font-size:11px;line-height:1.4;color:var(--mut)}.fc-voice-status[data-kind=success]{color:#168451}.fc-voice-status[data-kind=error]{color:#bd3e35}.fc-voice-status[data-kind=warning]{color:#9a6a00}.fc-voice-actions,.fc-voice-manual{display:grid;grid-template-columns:1fr 1fr;gap:7px}.fc-voice-actions button,.fc-voice-manual button{min-height:38px;padding:7px 9px;font-size:11px;font-weight:850}.fc-voice-manual button{background:var(--bg)}.fc-voice-panel .fc-inline-hint{font-size:10px;margin:0}.fc-live-queue-row{display:flex;align-items:center;gap:7px;min-width:0}.fc-live-queue-handle{width:30px;min-width:30px;min-height:38px;padding:0;border:0!important;background:transparent!important;box-shadow:none!important;color:var(--mut);font-size:20px;font-weight:900;letter-spacing:-3px;touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab}.fc-live-queue-handle:active,.fc-live-queue-handle.is-dragging{color:var(--acc);cursor:grabbing}.fc-live-queue-row.is-drag-source{opacity:.45}.fc-live-queue-row.is-drop-target{outline:2px dashed var(--acc);background:color-mix(in srgb,var(--acc) 7%,var(--card))}.fc-queue-badge{font-size:9px;font-weight:950;letter-spacing:.05em;border-radius:7px;padding:5px 6px;white-space:nowrap}.fc-queue-badge.current{background:rgba(22,163,106,.12);color:#168451}.fc-queue-badge.next{background:color-mix(in srgb,var(--acc) 11%,var(--card));color:var(--acc)}.fc-queue-remove{min-width:30px!important;width:30px;min-height:32px!important;padding:3px!important;border-radius:8px!important;color:var(--mut)}.fc-queue-remove:disabled{opacity:.35}.fc-queue-tools{margin:8px 12px 6px;padding:11px;border:1px solid var(--line);border-radius:13px;background:var(--card)}.fc-queue-tools-head{display:flex;align-items:center;justify-content:space-between;gap:10px}.fc-queue-tools-head>div{display:flex;flex-direction:column;gap:3px;min-width:0}.fc-queue-tools-head strong{font-size:13px}.fc-queue-tools-head small{font-size:10px;color:var(--mut)}.fc-queue-tools-head button{min-height:35px;padding:6px 10px;font-size:11px}.fc-queue-add-panel{display:flex;flex-direction:column;gap:8px;padding-top:10px}.fc-queue-add-panel[hidden]{display:none}.fc-queue-add-panel input{min-height:38px;font-size:12px}.fc-queue-search-results{display:flex;flex-direction:column;gap:5px;max-height:220px;overflow:auto}.fc-queue-search-row{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--line);font-size:11px}.fc-queue-search-row span{flex:1;min-width:0;line-height:1.35}.fc-queue-search-row button{min-height:32px;padding:5px 9px;font-size:10px}' +
+      '.fc-mini-next{display:flex;align-items:center;gap:8px;min-width:0;padding:5px 7px;border-radius:8px;background:var(--bg)}.fc-mini-next>span{font-size:8px;letter-spacing:.09em;font-weight:950;color:var(--mut);white-space:nowrap}.fc-mini-next strong{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1}.fc-mini-next small{font-size:9px;color:var(--mut);white-space:nowrap}.fc-mini-controls{display:flex;align-items:center;justify-content:center;gap:7px}.fc-mini-controls button{min-height:32px;padding:5px 9px;font-size:10px;font-weight:850;border-radius:9px}.fc-mini-controls button:disabled{opacity:.35}.fc-mini-player{gap:6px}.fc-mini-player .fc-mini-main button{min-height:32px}.fc-live-queue-row .playlist-open{flex:1;min-width:0}.fc-live-queue-row .playlist-open strong,.fc-live-queue-row .playlist-open small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.fc-live-queue-row .fc-play-song{flex:0 0 auto;min-width:62px}' +
       '.fc-sync-panel{border:1px solid var(--line);border-radius:16px;padding:13px;background:var(--card);display:flex;flex-direction:column;gap:9px}' +
       '.fc-drag-handle{width:32px;min-width:32px;height:36px;min-height:36px;padding:0;border:0!important;background:transparent!important;box-shadow:none!important;color:var(--mut);font-size:22px;font-weight:900;letter-spacing:-3px;cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none}.fc-drag-handle:active,.fc-drag-handle.is-dragging{cursor:grabbing;color:var(--acc);background:color-mix(in srgb,var(--acc) 10%,transparent)!important}.fc-event-selected-row{transition:transform .12s ease,border-color .12s ease}.fc-event-selected-row.is-drop-target{border:2px dashed var(--acc);background:color-mix(in srgb,var(--acc) 8%,var(--card))}.fc-event-selected-row.is-drag-source{opacity:.45}.event-selected-row .fc-event-song-head{min-width:0}.event-selected-row .fc-event-song-head .event-selected-title{min-width:0}.event-selected-row .fc-event-song-head>button:not(.fc-drag-handle){min-width:36px}' +
       '.fc-panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}.fc-panel-head strong{font-size:17px}.fc-panel-icon{font-size:25px}' +
@@ -2423,6 +2865,8 @@
       '.fc-live-row-current{outline:1px solid color-mix(in srgb,var(--acc) 25%,transparent);outline-offset:3px;border-radius:7px}.fc-profile-gate{position:fixed;inset:0;z-index:2000;display:grid;place-items:center;padding:18px;background:var(--bg);backdrop-filter:none}.fc-profile-card{width:min(100%,480px);max-height:90dvh;overflow:auto;background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:22px;padding:20px;box-shadow:0 18px 60px rgba(0,0,0,.3);display:flex;flex-direction:column;gap:12px}.fc-profile-brand{width:48px;height:48px;border-radius:15px;display:grid;place-items:center;background:var(--acc);color:var(--accfg);font-size:28px}.fc-profile-title{font-size:24px}.fc-profile-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.fc-profile-grid button{min-height:76px;text-align:left;display:flex;flex-direction:column;gap:4px;padding:11px}.fc-profile-grid button b{font-size:14px}.fc-profile-grid button small{color:var(--mut);font-size:11px}.fc-profile-foot{margin:0}.fc-request-row{display:grid;grid-template-columns:minmax(0,1fr);gap:9px;align-items:stretch}.fc-request-info{min-width:0;width:100%}.fc-request-info strong{white-space:normal;overflow-wrap:normal;word-break:normal}.fc-request-info small{white-space:normal;overflow-wrap:anywhere;word-break:normal;line-height:1.35}.fc-request-actions{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:7px;align-items:center;min-width:0}.fc-request-actions select{width:100%;min-width:0;max-width:100%;font-size:12px;padding:7px}.fc-request-actions button{min-width:0;white-space:nowrap}.fc-request-reject{padding-left:10px;padding-right:10px}.fc-admin-member-row{min-width:0}.fc-admin-member-row .fc-member-info{min-width:0}.fc-admin-member-row .fc-member-info small{overflow-wrap:normal;word-break:normal;line-height:1.35}.fc-section-control{display:grid;grid-template-columns:minmax(0,1fr) minmax(145px, .9fr);align-items:center;gap:9px;padding:8px 4px 3px 29px}.fc-section-key{font-size:11px;color:var(--mut);font-weight:800}.fc-section-control label{display:flex;align-items:center;gap:7px;justify-content:flex-end;font-size:11px;color:var(--mut);font-weight:800}.fc-section-control select{width:100%;min-width:0;min-height:36px;font-size:12px;padding:5px}.fc-category-filters{display:flex;gap:7px;overflow-x:auto;padding:9px 12px 4px;scrollbar-width:none}.fc-category-filters::-webkit-scrollbar{display:none}.fc-category-filters button{flex:1 0 auto;min-height:35px;padding:6px 12px;border-radius:11px;font-size:12px;font-weight:850;white-space:nowrap;background:var(--bg);color:var(--mut);box-shadow:none}.fc-category-filters button.active{background:var(--acc);color:var(--accfg)}.fc-mini-player{position:fixed;left:10px;right:10px;bottom:calc(8px + env(safe-area-inset-bottom));z-index:1100;display:flex;flex-direction:column;gap:5px;padding:9px 11px 7px;border:1px solid color-mix(in srgb,var(--acc) 38%,var(--line));border-radius:14px;background:color-mix(in srgb,var(--card) 94%,transparent);color:var(--fg);box-shadow:0 8px 26px rgba(0,0,0,.18);backdrop-filter:blur(12px)}body.fc-reader-open .fc-mini-player{bottom:calc(98px + env(safe-area-inset-bottom))}.fc-mini-top{display:flex;align-items:center;gap:6px;font-size:10px;font-weight:900;letter-spacing:.06em;color:var(--mut);min-width:0}.fc-mini-live-dot{width:8px;height:8px;border-radius:50%;background:#18a66a;flex:0 0 auto}.fc-mini-player.is-paused .fc-mini-live-dot{background:#d49b2e}.fc-mini-event{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;font-weight:700;letter-spacing:0}.fc-mini-state{white-space:nowrap}.fc-mini-main{display:flex;align-items:center;gap:9px;min-width:0}.fc-mini-copy{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}.fc-mini-copy strong{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.fc-mini-copy span{font-size:11px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.fc-mini-main button{min-height:35px;padding:6px 9px;font-size:11px;font-weight:850;white-space:nowrap}.fc-mini-player.is-free{border-color:color-mix(in srgb,#d49b2e 55%,var(--line))}.fc-mini-progress-track{height:3px;background:var(--line);border-radius:99px;overflow:hidden}.fc-mini-progress-track span{height:100%;display:block;width:0;background:var(--acc);transition:width .2s}.fc-mini-progress-text{position:absolute;right:11px;top:8px;font-size:9px;color:var(--mut);display:none}.fc-sync-panel .fc-request-row{display:grid;grid-template-columns:minmax(0,1fr);}.fc-sync-panel .fc-request-actions{grid-template-columns:minmax(0,1fr) auto auto}#list{padding-bottom:100px}.event-list{padding-bottom:100px}@media(max-width:480px){.fc-sync-panel .fc-request-actions{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.fc-sync-panel .fc-request-actions select{grid-column:1/-1}.fc-sync-panel .fc-request-actions button{width:100%;min-height:39px}.fc-sync-panel .fc-admin-member-row{display:grid;grid-template-columns:minmax(0,1fr);gap:7px}.fc-sync-panel .fc-admin-member-row select{width:100%;min-width:0;max-width:100%}.fc-sync-panel .fc-admin-member-row button{width:100%}.fc-section-control{grid-template-columns:1fr;gap:5px;padding-left:29px}.fc-section-control label{justify-content:space-between}.fc-section-control select{max-width:100%}}' +
       '.fc-pair-invite-overlay{position:fixed;inset:0;z-index:3000;display:grid;place-items:center;padding:18px;background:rgba(8,13,22,.72);padding-top:calc(18px + env(safe-area-inset-top));padding-bottom:calc(18px + env(safe-area-inset-bottom))}.fc-pair-invite-card{width:min(100%,440px);max-height:calc(100dvh - 36px - env(safe-area-inset-top) - env(safe-area-inset-bottom));overflow:auto;background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:22px;padding:22px;box-shadow:0 20px 70px rgba(0,0,0,.38);display:flex;flex-direction:column;gap:13px}.fc-pair-invite-card h2{font-size:22px;line-height:1.15;margin:0}.fc-pair-invite-card p{margin:0;font-size:14px;line-height:1.45}.fc-pair-invite-note{padding:10px 12px;border-radius:11px;background:var(--bg);color:var(--mut);font-size:12px;line-height:1.45}.fc-pair-invite-status{padding:10px 12px;border-radius:10px;background:var(--bg);font-size:13px!important;font-weight:700}.fc-pair-invite-card button{width:100%;min-height:46px}.fc-pair-invite-card button:disabled{opacity:.55;cursor:wait}';
     css += '.fc-sync-panel{max-width:980px;margin:0 auto;padding:12px 14px 28px;display:flex;flex-direction:column;gap:12px}.fc-panel-head{align-items:flex-start;padding:8px 2px}.fc-panel-head strong{font-size:20px;letter-spacing:-.02em}.fc-panel-head .note{max-width:680px;line-height:1.45;margin:5px 0 0}.fc-access-card{border:1px solid var(--line);border-radius:17px;background:var(--card);padding:16px;display:flex;flex-direction:column;gap:11px;min-width:0;box-shadow:0 4px 18px rgba(0,0,0,.045)}.fc-access-card-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.fc-access-card-head>div{display:flex;flex-direction:column;gap:3px;min-width:0}.fc-access-card-head strong{font-size:16px}.fc-eyebrow{font-size:10px;letter-spacing:.11em;font-weight:900;color:var(--mut)}.fc-access-badge{font-size:10px;font-weight:900;border-radius:999px;padding:6px 9px;white-space:nowrap;background:var(--bg);border:1px solid var(--line)}.fc-access-badge.is-ok{color:#148451;background:rgba(20,132,81,.1);border-color:rgba(20,132,81,.25)}.fc-access-badge.is-owner{color:var(--acc);background:color-mix(in srgb,var(--acc) 10%,var(--card))}.fc-access-badge.is-pending{color:var(--mut)}.fc-current-profile{font-size:15px;font-weight:800;margin:0;color:var(--fg)}.fc-profile-editor,.fc-owner-create{display:flex;flex-direction:column;gap:8px}.fc-tech-details,.fc-gate-tech{border-top:1px solid var(--line);padding-top:9px;margin-top:2px}.fc-tech-details summary,.fc-gate-tech summary,.fc-gate-alt summary{cursor:pointer;font-size:12px;font-weight:800;color:var(--mut);padding:4px 0}.fc-tech-uid{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px}.fc-tech-uid code{font-size:10px;overflow-wrap:anywhere;flex:1;min-width:0}.fc-tech-uid button{min-height:30px;padding:4px 8px;font-size:11px}.fc-device-access{border-color:color-mix(in srgb,var(--acc) 28%,var(--line))}.fc-access-icon{display:grid;place-items:center;width:36px;height:36px;border-radius:11px;background:var(--bg);font-size:20px}.fc-device-access .fc-secondary-action{width:100%;min-height:46px}.fc-inline-hint{font-size:11px;color:var(--mut);line-height:1.45;margin:0}.fc-owner-section{gap:12px}.fc-invite-output{display:flex;flex-direction:column;gap:8px;padding:11px;border-radius:12px;background:var(--bg);border:1px solid var(--line)}.fc-invite-output input{width:100%;min-width:0;font-size:12px}.fc-invite-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}.fc-invite-actions button{min-height:40px}.fc-pair-share-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}.fc-pair-share-actions button{min-height:42px}.fc-profile-card{width:min(100%,520px);max-height:min(92dvh,900px);padding:24px;gap:13px}.fc-profile-card .fc-profile-title{line-height:1.14;letter-spacing:-.025em}.fc-profile-card .fc-eyebrow{margin-top:2px}.fc-profile-grid button{border:1px solid var(--line);border-radius:13px;background:var(--bg);color:var(--fg);transition:border-color .15s,background .15s,transform .15s}.fc-profile-grid button.selected{border:2px solid var(--acc);background:color-mix(in srgb,var(--acc) 10%,var(--card));transform:translateY(-1px)}.fc-profile-grid button small{line-height:1.25}.fc-gate-primary{width:100%;min-height:48px;font-size:15px;font-weight:900}.fc-profile-foot{padding:10px 12px;border-radius:11px;background:var(--bg);line-height:1.45}.fc-gate-revoked{padding:10px 12px;background:rgba(190,65,50,.1);border:1px solid rgba(190,65,50,.22);border-radius:11px;color:#c45b38;font-weight:800}.fc-gate-alt{border:1px solid var(--line);border-radius:13px;padding:10px 12px;background:var(--bg);display:flex;flex-direction:column;gap:9px}.fc-gate-alt[open]{background:var(--card)}.fc-gate-alt p{margin:0;line-height:1.45}.fc-gate-alt input{width:100%;min-width:0;min-height:42px}.fc-gate-alt button{width:100%;min-height:42px}.fc-gate-alt #fcProfileGateQr{background:transparent;border:1px solid var(--line);color:var(--fg)}#fcGateAccessLinkStatus{overflow-wrap:anywhere}@media(max-width:560px){.fc-sync-panel{padding:8px 10px 24px}.fc-access-card{padding:13px;border-radius:14px}.fc-access-card-head{align-items:flex-start}.fc-invite-actions,.fc-pair-share-actions{grid-template-columns:1fr}.fc-profile-card{padding:18px;max-height:94dvh}.fc-profile-grid{gap:7px}.fc-profile-grid button{min-height:70px;padding:9px}.fc-profile-grid button b{font-size:13px}}';
+    css += '@media(max-width:520px){.fc-mini-next small{display:none}.fc-mini-controls{gap:5px}.fc-mini-controls button{flex:1;padding:5px 4px;font-size:9px}.fc-live-queue-row{gap:4px}.fc-queue-badge{font-size:8px;padding:4px}.fc-live-queue-row .fc-play-song{min-width:52px;padding:5px 6px}.fc-voice-actions,.fc-voice-manual{gap:6px}}';
+    css += 'body.fc-reader-open .fc-mini-player{bottom:calc(54px + env(safe-area-inset-bottom)) !important}';
     var style = document.createElement('style'); style.textContent = css; document.head.appendChild(style);
   }
 

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#f3f5f7">
-<meta name="fc-build" content="v25-onboarding-invite-device-roles">
+<meta name="fc-build" content="v26-voice-follow-live-queue">
 <title>Frecuencia Cero – Letras y acordes</title>
 <meta name="application-name" content="Frecuencia Cero">
 <meta name="apple-mobile-web-app-title" content="Frecuencia Cero">
@@ -395,7 +395,7 @@ body{
   </div>
   <p id="mmsg" class="note" aria-live="polite"></p>
   <div class="fc-app-meta">
-   <span id="fcAppVersion">Frecuencia Cero · V25</span>
+   <span id="fcAppVersion">Frecuencia Cero · V26</span>
    <button id="fcCheckUpdates" type="button">↻ Buscar actualizaciones</button>
   </div>
   <p id="fcUpdateStatus" class="fc-update-status" aria-live="polite">La versión instalada se conserva al actualizar.</p>
@@ -757,7 +757,7 @@ $('eventsBack').onclick=function(){show('vl')};$('eventNew').onclick=function(){
 // En dispositivos previamente vinculados no se muestra la copia local compartida
 // hasta que Firebase confirme que el perfil sigue autorizado. Esto evita que un
 // miembro retirado vea el catálogo antiguo mientras se verifica su acceso.
-// V25: conserva un respaldo local de versiones anteriores SOLO para que el propietario
+// V26: conserva un respaldo local de versiones anteriores SOLO para que el propietario
 // pueda importarlo a Firebase si la nube está vacía. No se muestra ni se carga al catálogo público.
 try {
   var fcV24SongBackup = localStorage.getItem(KEY) || localStorage.getItem('letras_v1') || localStorage.getItem('letras_fc_v2');
@@ -779,12 +779,12 @@ syncModeButton();setNotation();render();
 <!-- Generación y lectura de QR para vincular otro dispositivo al mismo perfil -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
-<script src="./fc-sync.js?v=25"></script>
+<script src="./fc-sync.js?v=26"></script>
 
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function () {
-    navigator.serviceWorker.register('./sw.js?v=25').catch(function (err) {
+    navigator.serviceWorker.register('./sw.js?v=26').catch(function (err) {
       console.warn('No se pudo registrar el modo sin conexión:', err);
     });
   });
