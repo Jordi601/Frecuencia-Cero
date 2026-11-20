@@ -4,7 +4,7 @@
 (function () {
   'use strict';
 
-  var APP_VERSION = 'V24';
+  var APP_VERSION = 'V25';
   var CFG_KEY = 'fc_firebase_config_v1';
   var BAND_KEY = 'fc_band_id_v1';
   var PROFILE_KEY = 'fc_device_profile_v1';
@@ -107,6 +107,8 @@
   var memberInviteCheckStarted = false;
   var genericJoinLink = false;
   var ownerLocalMigrationPrompted = false;
+  var currentMemberInviteLink = '';
+  var accessLinkProcessing = false;
 
   function $(id) { return document.getElementById(id); }
   function safeJson(value) { try { return JSON.stringify(value); } catch (e) { return '{}'; } }
@@ -132,8 +134,8 @@
   function canManageCatalog() { return isConnected() && isTechnicalOwner(); }
   function canManageEvents() { return isConnected() && (isTechnicalOwner() || memberRole === 'voice1'); }
   function roleName(role) { return ROLE_LABELS[role] || 'Integrante'; }
-  function hasValidJoinEntryPoint() {
-    return !!(genericJoinLink || incomingMemberInviteToken || (accessRevoked && revocationMode !== 'devices'));
+  function canRequestMembership() {
+    return !!(currentUser && db && !bandId && selectedProfileRole && selectedProfileRole !== 'accordionist' && selectedProfileRole !== 'pending' && !(accessRevoked && revocationMode === 'devices'));
   }
   function randomCode() {
     var chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -180,8 +182,15 @@
       if (connected) $('fcProfileSelect').value = memberRole;
       else if (selectedProfileRole) $('fcProfileSelect').value = selectedProfileRole;
     }
+    if ($('fcProfileEditor')) $('fcProfileEditor').style.display = (!connected && !ownerDevice) ? '' : 'none';
+    if ($('fcOwnerCreateCard')) $('fcOwnerCreateCard').style.display = (ownerDevice && !connected) ? '' : 'none';
     if ($('fcProfileSave')) $('fcProfileSave').style.display = (connected || ownerDevice) ? 'none' : '';
     if ($('fcProfileSelect') && ownerDevice && !connected) $('fcProfileSelect').style.display = 'none';
+    if ($('fcProfileIdentityBadge')) {
+      $('fcProfileIdentityBadge').textContent = connected ? 'Acceso autorizado' : (ownerDevice ? 'Propietario técnico' : 'Sin autorización');
+      $('fcProfileIdentityBadge').className = 'fc-access-badge ' + (connected ? 'is-ok' : (ownerDevice ? 'is-owner' : 'is-pending'));
+    }
+    if ($('fcPairActions')) $('fcPairActions').style.display = connected ? '' : 'none';
     if ($('fcDeviceUid')) $('fcDeviceUid').textContent = currentUser ? currentUser.uid : 'Preparando identidad de este teléfono…';
     if ($('fcCopyUid')) $('fcCopyUid').style.display = currentUser && !connected ? '' : 'none';
     // Dos acciones independientes: el propietario crea la banda; después genera el QR.
@@ -192,21 +201,17 @@
     }
     if ($('fcOwnerMismatch')) $('fcOwnerMismatch').style.display = (!connected && selectedProfileRole === 'accordionist' && currentUser && currentUser.uid !== OWNER_UID) ? '' : 'none';
     if ($('fcCurrentOwnerUid')) $('fcCurrentOwnerUid').textContent = currentUser ? currentUser.uid : 'Preparando identidad…';
-    if ($('fcRequestJoin')) $('fcRequestJoin').style.display = (!connected && selectedProfileRole && selectedProfileRole !== 'accordionist') ? '' : 'none';
+    if ($('fcRequestJoin')) $('fcRequestJoin').style.display = (!connected && canRequestMembership()) ? '' : 'none';
     if ($('fcRequestJoin')) $('fcRequestJoin').disabled = !signed || !!(window.fcJoinRequestPending);
     if ($('fcLinkDevice')) {
       $('fcLinkDevice').style.display = connected ? '' : 'none';
       $('fcLinkDevice').disabled = !signed;
       $('fcLinkDevice').textContent = '▦ Generar código QR para vincular otro dispositivo';
     }
-    if ($('fcScanDeviceLink')) $('fcScanDeviceLink').style.display = (!connected && signed && !ownerDevice) ? '' : 'none';
-    if ($('fcPairHelp')) $('fcPairHelp').textContent = ownerDevice
-      ? (connected
-          ? 'Este es el dispositivo propietario. Pulsa Generar código QR y escanéalo desde el teléfono o tablet que quieras vincular.'
-          : 'Este iPhone está identificado como propietario. Primero pulsa «Crear banda». Cuando se conecte, aparecerá por separado «Generar código QR».')
-      : (connected
-          ? 'Genera un QR para vincular otro teléfono o tablet a tu mismo perfil.'
-          : 'Este dispositivo todavía no está vinculado. Escanea aquí el QR que genere un teléfono autorizado.');
+    if ($('fcScanDeviceLink')) $('fcScanDeviceLink').style.display = 'none';
+    if ($('fcPairHelp')) $('fcPairHelp').textContent = connected
+      ? 'El QR o enlace añade otro navegador a ESTE perfil: ' + roleName(memberRole) + '. No crea otro integrante ni necesita aprobación. Para añadir un dispositivo de Voz 2, genera el enlace desde una sesión ya autorizada como Voz 2.'
+      : 'Primero solicita o completa tu acceso. Después podrás añadir dispositivos a tu propio perfil.';
     if ($('fcBandName')) $('fcBandName').style.display = (!connected && ownerDevice) ? '' : 'none';
     if ($('fcBandSummary')) $('fcBandSummary').textContent = connected
       ? ((bandMeta && bandMeta.name) || 'Frecuencia Cero') + ' · ' + roleName(memberRole)
@@ -463,15 +468,14 @@
     try {
       if (!currentUser || !db) throw new Error('Espera a que Firebase identifique este teléfono.');
       if (accessRevoked && revocationMode === 'devices') throw new Error('Este perfil sigue perteneciendo a la banda. Escanea un nuevo QR desde un dispositivo autorizado para volver a vincular este teléfono.');
-      if (!hasValidJoinEntryPoint()) throw new Error('Para solicitar acceso necesitas abrir el enlace de invitación que te envió el propietario. La dirección pública por sí sola no concede acceso.');
       var role = selectedProfileRole || ($('fcProfileSelect') && $('fcProfileSelect').value);
-      if (!role || role === 'accordionist' || !ROLE_OPTIONS.some(function (r) { return r[0] === role; })) throw new Error('La función Acordeonista está reservada al propietario técnico. Selecciona otra función disponible.');
+      if (!role || role === 'accordionist' || role === 'pending' || !ROLE_OPTIONS.some(function (r) { return r[0] === role; })) throw new Error('La función Acordeonista está reservada al propietario técnico. Selecciona otra función disponible.');
       if (bandId) throw new Error('Este teléfono ya pertenece a la banda.');
       if (incomingMemberInviteToken && incomingMemberInvite && incomingMemberInvite.role !== role) throw new Error('Esta invitación está reservada para ' + roleName(incomingMemberInvite.role) + '.');
       var reqRef = db.ref('bands/' + FIXED_BAND_ID + '/joinRequests/' + currentUser.uid);
       var existing = await reqRef.once('value');
       if (existing.exists()) { window.fcJoinRequestPending = true; var existingStatus = $('fcGateStatus'); if (existingStatus) existingStatus.textContent = 'Ya existe una solicitud pendiente. El repertorio se abrirá cuando el propietario la apruebe.'; var existingButton = $('fcGateRequestJoin'); if (existingButton) { existingButton.disabled = true; existingButton.textContent = 'Solicitud pendiente'; } updateSyncButtons(); return; }
-      var requestData = { requestedRole: role, deviceName: ROLE_LABELS[role], requestedAt: firebase.database.ServerValue.TIMESTAMP, status: 'pending' };
+      var requestData = { requestedRole: role, deviceName: ROLE_LABELS[role], requestedAt: firebase.database.ServerValue.TIMESTAMP, status: 'pending', requestedVia: incomingMemberInviteToken ? 'role-invite-link' : (genericJoinLink ? 'general-invite-link' : 'profile-selection') };
       if (incomingMemberInviteToken) {
         var claimedInvite = await claimMemberInvite(incomingMemberInviteToken, role);
         requestData.inviteToken = incomingMemberInviteToken;
@@ -488,8 +492,10 @@
       setStatus('Solicitud enviada como ' + roleName(role) + '. Esperando aprobación del propietario.', 'success');
       updateSyncButtons();
     } catch (err) {
-      var msg = err && err.code === 'PERMISSION_DENIED' ? 'No se pudo enviar la solicitud. Primero el propietario técnico debe crear la banda y publicar las reglas correctas.' : (err.message || 'Error desconocido.');
-      setStatus('No se pudo solicitar acceso: ' + msg, 'error');
+      var msg = err && err.code === 'PERMISSION_DENIED' ? 'Firebase rechazó la solicitud. Comprueba que el propietario haya creado la banda y que estén publicadas las reglas V24 de invitaciones.' : (err.message || 'Error desconocido.');
+      setStatus('No se pudo solicitar incorporación: ' + msg, 'error');
+      var gateStatus = $('fcGateStatus'); if (gateStatus) gateStatus.textContent = 'No se pudo enviar la solicitud: ' + msg;
+      var gateButton = $('fcGateRequestJoin'); if (gateButton) { gateButton.disabled = false; gateButton.textContent = 'Reintentar solicitud'; }
     }
   }
   async function approveJoinRequest(uid, role) {
@@ -552,15 +558,37 @@
         url.searchParams.set('fc_member_invite', token);
       }
       var link = url.toString();
+      currentMemberInviteLink = link;
+      var output = $('fcMemberInviteOutput'); if (output) output.style.display = '';
       var field = $('fcMemberInviteUrl');
       if (field) { field.value = link; field.style.display = ''; field.focus(); field.select(); }
       var copy = $('fcCopyMemberInvite'); if (copy) { copy.style.display = ''; copy.onclick = function () {
         if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(link).then(function () { showMemberInviteResult('Enlace copiado. Envíalo por WhatsApp o mensaje.', false); }).catch(function () { if (field) { field.focus(); field.select(); } showMemberInviteResult('Selecciona el enlace y cópialo manualmente.', false); });
         else { if (field) { field.focus(); field.select(); } showMemberInviteResult('Selecciona el enlace y cópialo manualmente.', false); }
       }; }
-      showMemberInviteResult(role === 'choose' ? 'Enlace general listo. La persona elegirá su función y enviará una solicitud. Tú tendrás que aprobarla.' : 'Enlace para ' + roleName(role) + ' listo. La función llegará preseleccionada. La persona deberá solicitar acceso y tú tendrás que aprobarlo. Vence en 7 días y se reclama una sola vez.', false);
+      var shareButton = $('fcShareMemberInvite'); if (shareButton) shareButton.style.display = '';
+      showMemberInviteResult(role === 'choose' ? 'Enlace general listo. La persona puede instalar primero la app, elegir su función y solicitar acceso. Tú tendrás que aprobarla.' : 'Enlace para ' + roleName(role) + ' listo. La función llegará preseleccionada. La persona deberá solicitar acceso y tú tendrás que aprobarlo. Vence en 7 días y se reclama una sola vez.', false);
     } catch (err) { showMemberInviteResult('No se pudo crear el enlace: ' + (err.message || err), true); }
   }
+  async function shareMemberInviteLink() {
+    if (!currentMemberInviteLink) { showMemberInviteResult('Primero crea un enlace de invitación.', true); return; }
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: 'Invitación a Frecuencia Cero', text: 'Abre Frecuencia Cero desde el dispositivo donde usarás la app, selecciona tu perfil y solicita incorporación. El propietario aprobará el acceso.', url: currentMemberInviteLink });
+        showMemberInviteResult('Invitación compartida.', false);
+      } else if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(currentMemberInviteLink);
+        showMemberInviteResult('El enlace se copió al portapapeles.', false);
+      } else {
+        var field = $('fcMemberInviteUrl'); if (field) { field.focus(); field.select(); }
+        showMemberInviteResult('Selecciona el enlace y cópialo manualmente.', false);
+      }
+    } catch (err) {
+      if (err && err.name === 'AbortError') return;
+      showMemberInviteResult('No se pudo compartir automáticamente. Usa Copiar enlace.', true);
+    }
+  }
+
   async function maybeProcessIncomingMemberInvite() {
     if (!currentUser || !db || memberInviteCheckStarted) return;
     var token = '';
@@ -604,8 +632,8 @@
       var gate = $('fcFirstProfileGate');
       if (gate) {
         var grid = gate.querySelector('.fc-profile-grid'); if (grid) grid.style.display = 'none';
-        var status = $('fcGateStatus'); if (status) status.textContent = 'Te invitaron como ' + roleName(invite.role) + '. Pulsa Solicitar acceso. El repertorio seguirá bloqueado hasta que el propietario apruebe tu solicitud.';
-        var request = $('fcGateRequestJoin'); if (request) { request.style.display = ''; request.disabled = false; request.textContent = 'Solicitar acceso como ' + roleName(invite.role); }
+        var status = $('fcGateStatus'); if (status) status.textContent = 'Te invitaron como ' + roleName(invite.role) + '. Pulsa Solicitar incorporación. El repertorio seguirá bloqueado hasta que el propietario apruebe tu solicitud.';
+        var request = $('fcGateRequestJoin'); if (request) { request.style.display = ''; request.disabled = false; request.textContent = 'Solicitar incorporación como ' + roleName(invite.role); }
         var intro = $('fcGateIntro'); if (intro) intro.textContent = 'Invitación con función preasignada';
         gate.style.display = 'grid'; firstProfileGateShown = true;
       }
@@ -845,7 +873,7 @@
       closePairQr();
       pairQrToken = token; pairQrRef = ref;
       var box = $('fcPairQrBox');
-      box.innerHTML = '<div class="fc-pair-title">Vincular otro dispositivo</div><p class="note">Abre Frecuencia Cero en el otro teléfono o tablet y pulsa Escanear QR. Este QR vence en 3 minutos y solo sirve una vez.</p><div id="fcPairQrCanvas" class="fc-pair-qr"></div><div id="fcPairUrlText" class="fc-pair-url"></div><div id="fcPairCountdown" class="note">Válido durante 3:00</div><button type="button" id="fcPairCopy">Copiar enlace alternativo</button><button type="button" id="fcPairCancel">Cancelar QR</button>';
+      box.innerHTML = '<div class="fc-pair-title">Añadir dispositivo a ' + roleName(pairingRole) + '</div><p class="note">Este QR y su enlace vinculan el nuevo navegador a este perfil: ' + roleName(pairingRole) + '. No crean otro integrante ni requieren aprobación. Para añadir un dispositivo a Voz 2, genera el enlace desde una sesión ya autorizada como Voz 2. Vence en 3 minutos y se usa una sola vez.</p><div id="fcPairQrCanvas" class="fc-pair-qr"></div><div id="fcPairUrlText" class="fc-pair-url"></div><div id="fcPairCountdown" class="note">Válido durante 3:00</div><div class="fc-pair-share-actions"><button type="button" id="fcPairCopy">Copiar enlace para este perfil</button><button type="button" id="fcPairShare">Compartir enlace…</button></div><button type="button" id="fcPairCancel">Cancelar</button>';
       box.style.display = '';
       var link = pairingUrl(token);
       $('fcPairUrlText').innerHTML = '';
@@ -861,8 +889,9 @@
       } else {
         $('fcPairQrCanvas').textContent = 'No se pudo cargar el generador QR. Puedes abrir el enlace en el otro dispositivo.';
       }
-      $('fcPairCopy').onclick = function () { if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(link).then(function () { setStatus('Enlace alternativo copiado.', 'success'); }).catch(function () { setStatus('No se pudo copiar. Mantén pulsado el enlace para copiarlo.', 'warning'); }); else setStatus('Mantén pulsado el enlace para copiarlo.', 'neutral'); };
-      $('fcPairCancel').onclick = function () { ref.remove().catch(function () {}); closePairQr('Código de vinculación cancelado.'); };
+      $('fcPairCopy').onclick = function () { if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(link).then(function () { setStatus('Enlace copiado para añadir un dispositivo al perfil ' + roleName(pairingRole) + '.', 'success'); }).catch(function () { setStatus('No se pudo copiar. Mantén pulsado el enlace para copiarlo.', 'warning'); }); else setStatus('Mantén pulsado el enlace para copiarlo.', 'neutral'); };
+      $('fcPairShare').onclick = async function () { try { if (navigator.share) await navigator.share({ title: 'Añadir dispositivo a ' + roleName(pairingRole), text: 'Abre Frecuencia Cero en el dispositivo que quieres añadir a este mismo perfil.', url: link }); else if (navigator.clipboard && navigator.clipboard.writeText) { await navigator.clipboard.writeText(link); setStatus('Enlace copiado. Pégalo dentro de Frecuencia Cero en el otro dispositivo.', 'success'); } } catch (shareErr) { if (!shareErr || shareErr.name !== 'AbortError') setStatus('No se pudo compartir. Usa Copiar enlace para este perfil.', 'warning'); } };
+      $('fcPairCancel').onclick = function () { ref.remove().catch(function () {}); closePairQr('Vinculación cancelada.'); };
       ref.on('value', function (snap) {
         var state = snap.val();
         if (!state) return;
@@ -999,6 +1028,30 @@
       '<button type="button" id="fcPairInviteCancel">Cancelar</button>' +
       '</section>';
     document.body.appendChild(overlay);
+    // Muestra el perfil de destino antes de que el usuario confirme. Así evita
+    // confundir un QR del Acordeonista con una invitación para Voz 2, por ejemplo.
+    if (token && currentUser && db) {
+      db.ref('bands/' + FIXED_BAND_ID + '/devicePairings/' + token.toLowerCase()).once('value').then(function (snap) {
+        var info = snap.val();
+        var statusNode = $('fcPairInviteStatus');
+        var acceptButton = $('fcPairInviteAccept');
+        if (!statusNode || !$('fcPairInviteGate')) return;
+        if (!info) {
+          statusNode.textContent = 'No se encontró esta invitación. Pide que generen un enlace nuevo desde el perfil correcto.';
+          if (acceptButton) acceptButton.disabled = true;
+          return;
+        }
+        if (info.status !== 'pending' || Number(info.expiresAt) <= serverNow()) {
+          statusNode.textContent = 'Este enlace ya se utilizó o venció. Genera uno nuevo desde el perfil que deseas añadir.';
+          if (acceptButton) acceptButton.disabled = true;
+          return;
+        }
+        statusNode.textContent = 'Este dispositivo se añadirá al perfil ' + roleName(info.role) + '. No crea un integrante nuevo ni requiere aprobación adicional. Confirma solo si ese es el perfil que quieres usar.';
+      }).catch(function (err) {
+        var statusNode = $('fcPairInviteStatus');
+        if (statusNode && $('fcPairInviteGate')) statusNode.textContent = 'No se pudo consultar el perfil del enlace: ' + (err.message || 'error de Firebase') + '. Puedes volver a intentarlo.';
+      });
+    }
     var accept = $('fcPairInviteAccept');
     if (accept) accept.onclick = async function () {
       accept.disabled = true;
@@ -1018,6 +1071,48 @@
       maybeShowFirstProfileGate();
     };
   }
+  async function continueWithPastedAccessLink() {
+    if (accessLinkProcessing) return;
+    var field = $('fcGateAccessLinkInput');
+    var raw = field ? field.value.trim() : '';
+    if (!raw) { setText('fcGateAccessLinkStatus', 'Pega primero el enlace que te compartieron.'); return; }
+    accessLinkProcessing = true;
+    try {
+      var parsed = new URL(raw, window.location.href);
+      if (parsed.origin !== window.location.origin) throw new Error('El enlace debe pertenecer a Frecuencia Cero. Pide que te compartan el enlace completo de esta aplicación.');
+      var pairToken = parsed.searchParams.get('fc_pair') || '';
+      var memberToken = parsed.searchParams.get('fc_member_invite') || '';
+      var generalJoin = parsed.searchParams.get('fc_join') === '1';
+      if (pairToken) {
+        if (!/^[a-f0-9]{48}$/i.test(pairToken)) throw new Error('El enlace de dispositivo no tiene un código válido.');
+        setText('fcGateAccessLinkStatus', 'Enlace de dispositivo identificado. Confirma para añadir este navegador al perfil que ya tienes autorizado.');
+        showIncomingPairPrompt(pairToken.toLowerCase());
+        return;
+      }
+      if (memberToken) {
+        if (!/^[a-f0-9]{48}$/i.test(memberToken)) throw new Error('El enlace de invitación no tiene un código válido.');
+        var current = new URL(window.location.href);
+        current.searchParams.delete('fc_pair'); current.searchParams.delete('fc_join');
+        current.searchParams.set('fc_member_invite', memberToken.toLowerCase());
+        history.replaceState({}, '', current.pathname + current.search + current.hash);
+        memberInviteCheckStarted = false; incomingMemberInviteToken = ''; incomingMemberInvite = null; genericJoinLink = false;
+        await maybeProcessIncomingMemberInvite();
+        setText('fcGateAccessLinkStatus', 'Invitación verificada. Revisa la función preseleccionada y pulsa Solicitar incorporación.');
+        return;
+      }
+      if (generalJoin) {
+        genericJoinLink = true;
+        setText('fcGateStatus', 'Invitación general reconocida. Selecciona tu función y pulsa Solicitar incorporación; el propietario debe aprobarte.');
+        setText('fcGateAccessLinkStatus', 'Enlace general reconocido. Ahora selecciona tu perfil.');
+        if (field) field.value = '';
+        return;
+      }
+      throw new Error('No reconocí este enlace. Debe ser una invitación de integrante o un enlace para añadir otro dispositivo.');
+    } catch (err) {
+      setText('fcGateAccessLinkStatus', err.message || 'No se pudo interpretar el enlace.');
+    } finally { accessLinkProcessing = false; }
+  }
+
   async function claimDevicePairing(token, fromLink) {
     if (pairProcessing) return false;
     pairProcessing = true;
@@ -2032,20 +2127,18 @@
       if (incomingMemberInviteToken && incomingMemberInvite) {
         if (grid) grid.style.display = 'none';
         if (status) status.textContent = 'Te invitaron como ' + roleName(incomingMemberInvite.role) + '. Solicita acceso; el repertorio se desbloqueará solamente cuando el propietario te apruebe.';
-        if (requestButton) { requestButton.style.display = ''; requestButton.disabled = !!window.fcJoinRequestPending; requestButton.textContent = window.fcJoinRequestPending ? 'Solicitud pendiente' : 'Solicitar acceso como ' + roleName(incomingMemberInvite.role); }
+        if (requestButton) { requestButton.style.display = ''; requestButton.disabled = !!window.fcJoinRequestPending; requestButton.textContent = window.fcJoinRequestPending ? 'Solicitud pendiente' : 'Solicitar incorporación como ' + roleName(incomingMemberInvite.role); }
       } else if (window.fcJoinRequestPending) {
         if (status) status.textContent = 'Tu solicitud está pendiente de aprobación. El catálogo y los eventos permanecerán bloqueados hasta que el propietario te autorice.';
         if (requestButton) { requestButton.style.display = ''; requestButton.disabled = true; requestButton.textContent = 'Solicitud pendiente'; }
       } else if (selectedProfileRole && selectedProfileRole !== 'accordionist') {
-        if (status) status.textContent = hasValidJoinEntryPoint()
-          ? 'Perfil seleccionado: ' + roleName(selectedProfileRole) + '. Pulsa Solicitar acceso. No verás el repertorio hasta que el propietario te apruebe.'
-          : 'Perfil seleccionado: ' + roleName(selectedProfileRole) + '. Para solicitar acceso necesitas abrir el enlace de invitación que te envió el propietario.';
-        if (requestButton) { requestButton.style.display = hasValidJoinEntryPoint() ? '' : 'none'; requestButton.disabled = !!window.fcJoinRequestPending; requestButton.textContent = 'Solicitar acceso'; }
+        if (status) status.textContent = 'Seleccionaste ' + roleName(selectedProfileRole) + '. Pulsa Solicitar incorporación. No necesitas QR ni enlace especial; el propietario aprobará el acceso antes de mostrarte canciones y eventos.';
+        if (requestButton) { requestButton.style.display = canRequestMembership() ? '' : 'none'; requestButton.disabled = !!window.fcJoinRequestPending; requestButton.textContent = window.fcJoinRequestPending ? 'Solicitud pendiente' : 'Solicitar incorporación'; }
       } else {
         if (status) status.textContent = genericJoinLink
-          ? 'Abriste una invitación general a Frecuencia Cero. Selecciona tu función y solicita acceso; el propietario debe aprobarte.'
-          : 'Selecciona tu función para identificar el perfil que necesitas. Para solicitar acceso, abre el enlace de invitación que te envió el propietario. La dirección pública no concede acceso.';
-        if (requestButton) requestButton.style.display = 'none';
+          ? 'Invitación general reconocida. Selecciona tu función y solicita incorporación; el propietario debe aprobarte.'
+          : 'Selecciona tu función y pulsa Solicitar incorporación. No necesitas escanear un QR para entrar como integrante nuevo. El acceso se activa únicamente después de la aprobación del propietario.';
+        if (requestButton) { requestButton.style.display = 'none'; requestButton.textContent = 'Solicitar incorporación'; }
       }
     }
     if (grid && selectedProfileRole && !incomingMemberInviteToken) {
@@ -2067,7 +2160,7 @@
         return;
       }
       var registration = await navigator.serviceWorker.getRegistration('./');
-      if (!registration) registration = await navigator.serviceWorker.register('./sw.js?v=24');
+      if (!registration) registration = await navigator.serviceWorker.register('./sw.js?v=25');
       var controllerChanged = new Promise(function (resolve) {
         var finished = false;
         var finish = function () {
@@ -2117,19 +2210,91 @@
     var menu = document.querySelector('#vm .menu-content');
     if (menu && !$('fcSyncPanel')) {
       var panel = document.createElement('section'); panel.id = 'fcSyncPanel'; panel.className = 'fc-sync-panel';
-      panel.innerHTML = '<div class="fc-panel-head"><div><strong>Mi banda y sincronización</strong><p class="note">La primera vez eliges tu perfil. Para incorporar a otra persona, debe solicitar acceso y el propietario la aprueba. El QR sirve para vincular otro teléfono o tablet al mismo perfil.</p></div><span class="fc-panel-icon">☁️</span></div>' +
-        '<div id="fcSyncStatus" class="fc-status neutral">Conectando con Firebase…</div>' +
-        '<div class="fc-band-box"><strong>Mi perfil en Frecuencia Cero</strong><label class="fc-field-label" for="fcProfileSelect">Selecciona quién utiliza este teléfono</label><select id="fcProfileSelect"><option value="">Seleccionar perfil…</option><option value="voice1">Voz 1 · Hombre (Director)</option><option value="voice2">Voz 2 · Mujer</option><option value="bass">Bajista</option><option value="accordionist">Acordeonista</option><option value="drummer">Baterista</option><option value="keyboardist">Tecladista</option></select><button id="fcProfileSave" class="p">Guardar mi perfil</button><p id="fcBandSummary" class="note">Selecciona tu perfil para continuar.</p><label class="fc-field-label" for="fcBandName">Nombre de la banda</label><input id="fcBandName" placeholder="Frecuencia Cero" value="Frecuencia Cero"><button id="fcCreateBand" class="p" style="display:none">Crear banda como propietario técnico</button><div id="fcOwnerMismatch" class="fc-pair-box" style="display:none"><strong>Este parece ser el primer dispositivo, pero el UID no coincide con el propietario configurado.</strong><p class="note">No necesitas QR para iniciar la banda. Copia este ID actual y actualizaremos la autorización de Firebase.</p><code id="fcCurrentOwnerUid"></code><button type="button" id="fcCopyCurrentOwnerUid">Copiar ID actual</button></div><button id="fcRequestJoin" class="p" style="display:none">Solicitar incorporación</button><p class="note">El propietario crea la banda primero. Una vez conectada, utiliza el botón independiente para generar un QR. Los demás integrantes solicitan acceso y el propietario los aprueba; un QR vincula otro teléfono al mismo perfil.</p><div class="note">ID de este teléfono: <code id="fcDeviceUid">Preparando…</code> <button id="fcCopyUid" style="display:none">Copiar ID</button></div><div id="fcPairActions" class="fc-pair-actions"><div class="fc-member-head"><strong>Vincular otro dispositivo</strong></div><p id="fcPairHelp" class="note">El dispositivo autorizado genera el QR; el dispositivo nuevo lo escanea.</p><button id="fcLinkDevice" type="button" style="display:none">▦ Generar código QR</button><button id="fcScanDeviceLink" class="p" style="display:none">📷 Escanear código QR</button></div><div id="fcPairQrBox" class="fc-pair-box" style="display:none"></div><div id="fcPairScannerWrap" class="fc-pair-box" style="display:none"><div id="fcPairScanner"></div><p id="fcPairScannerStatus" class="note">Preparando cámara…</p><button type="button" id="fcPairScannerClose">Cerrar cámara</button></div></div>' +
-        '<div id="fcJoinRequests" class="fc-member-admin" style="display:none"><div class="fc-member-head"><strong>Solicitudes de integrantes</strong></div><div id="fcJoinRequestsList"></div></div>' +
-        '<div id="fcMemberInvitePanel" class="fc-member-admin" style="display:none"><div class="fc-member-head"><strong>Invitar integrantes por enlace</strong></div><p class="note">El enlace general permite que la persona elija su función. También puedes enviar un enlace con la función preseleccionada. En ambos casos debe solicitar acceso y tú debes aprobarlo.</p><label class="fc-field-label" for="fcMemberInviteRole">Función de la invitación</label><select id="fcMemberInviteRole"><option value="choose">Enlace general · la persona elige</option><option value="voice1">Voz 1 · Director</option><option value="voice2">Voz 2</option><option value="bass">Bajista</option><option value="drummer">Baterista</option><option value="keyboardist">Tecladista</option></select><button id="fcCreateMemberInvite" class="p" type="button">Crear enlace de invitación</button><input id="fcMemberInviteUrl" type="text" readonly style="display:none" aria-label="Enlace de invitación"><button id="fcCopyMemberInvite" type="button" style="display:none">Copiar enlace</button><p id="fcMemberInviteResult" class="note"></p></div>' +
-        '<div id="fcMemberAdmin" class="fc-member-admin" style="display:none"><div class="fc-member-head"><strong>Integrantes y funciones (6 plazas)</strong><span id="fcOnlineCount" class="note"></span></div><p class="note">El propietario técnico administra el catálogo, integrantes y dispositivos. Voz 1 dirige los eventos y puede crear y organizar repertorios. Cada función se asigna a una sola persona.</p><div id="fcMembers"></div></div>' +
-        '<div id="fcMyDevicesBox" class="fc-member-admin" style="display:none"><div class="fc-member-head"><strong>Mis dispositivos vinculados</strong></div><p class="note">Puedes vincular varios teléfonos o tablets a tu mismo perfil y revocar los que ya no utilices.</p><div id="fcMyDevices"></div></div>' +
-        '<label class="fc-follow-row"><input type="checkbox" id="fcFollow" checked> Seguir automáticamente la canción que elija Voz 1</label>';
+      panel.innerHTML = `
+        <div class="fc-panel-head">
+          <div><span class="fc-eyebrow">FRECUENCIA CERO</span><strong>Mi banda y acceso</strong><p class="note">Administra tu perfil, invita integrantes y añade dispositivos sin confundir los dos procesos.</p></div>
+          <span class="fc-panel-icon">☁️</span>
+        </div>
+        <div id="fcSyncStatus" class="fc-status neutral">Conectando con Firebase…</div>
+
+        <section class="fc-access-card">
+          <div class="fc-access-card-head">
+            <div><span class="fc-eyebrow">TU SESIÓN</span><strong>Perfil en Frecuencia Cero</strong></div>
+            <span id="fcProfileIdentityBadge" class="fc-access-badge is-pending">Comprobando acceso…</span>
+          </div>
+          <p id="fcBandSummary" class="fc-current-profile">Comprobando tu perfil…</p>
+          <div id="fcProfileEditor" class="fc-profile-editor" style="display:none">
+            <label class="fc-field-label" for="fcProfileSelect">¿Qué función utilizas?</label>
+            <select id="fcProfileSelect"><option value="">Seleccionar perfil…</option><option value="voice1">Voz 1 · Director</option><option value="voice2">Voz 2 · Cantante</option><option value="bass">Bajista</option><option value="drummer">Baterista</option><option value="keyboardist">Tecladista</option><option value="accordionist">Acordeonista · Propietario</option></select>
+            <button id="fcProfileSave" class="p" type="button">Solicitar incorporación</button>
+          </div>
+          <div id="fcOwnerCreateCard" class="fc-owner-create" style="display:none">
+            <p class="fc-inline-hint">Este es el dispositivo propietario. Crea la banda una sola vez; después podrás invitar integrantes y vincular otros dispositivos.</p>
+            <label class="fc-field-label" for="fcBandName">Nombre de la banda</label>
+            <input id="fcBandName" placeholder="Frecuencia Cero" value="Frecuencia Cero">
+            <button id="fcCreateBand" class="p" type="button" style="display:none">＋ Crear banda</button>
+          </div>
+          <div id="fcOwnerMismatch" class="fc-pair-box" style="display:none"><strong>Este dispositivo todavía no está reconocido como propietario.</strong><p class="note">No selecciones Acordeonista en otro UID. Usa un enlace de dispositivo generado desde la sesión propietaria.</p><code id="fcCurrentOwnerUid"></code><button type="button" id="fcCopyCurrentOwnerUid">Copiar ID técnico</button></div>
+          <details class="fc-tech-details"><summary>Información técnica del dispositivo</summary><div class="fc-tech-uid"><code id="fcDeviceUid">Preparando identidad…</code><button id="fcCopyUid" type="button" style="display:none">Copiar ID</button></div></details>
+        </section>
+
+        <section id="fcPairActions" class="fc-access-card fc-device-access" style="display:none">
+          <div class="fc-access-card-head"><div><span class="fc-eyebrow">PARA TU PERFIL ACTUAL</span><strong>Añadir otro dispositivo</strong></div><span class="fc-access-icon">📱</span></div>
+          <p id="fcPairHelp" class="fc-inline-hint">Genera un enlace o QR para añadir una laptop, tablet o teléfono a este mismo perfil. No crea otro integrante y no necesita aprobación.</p>
+          <button id="fcLinkDevice" class="p fc-secondary-action" type="button" style="display:none">▦ Generar QR o enlace para este perfil</button>
+          <p class="fc-inline-hint">Importante: el enlace se genera desde el perfil que quieres duplicar. Si quieres añadir un dispositivo a Voz 2, primero abre una sesión autorizada de Voz 2.</p>
+          <button id="fcScanDeviceLink" type="button" style="display:none">Escanear QR</button>
+        </section>
+        <div id="fcPairQrBox" class="fc-pair-box" style="display:none"></div>
+        <div id="fcPairScannerWrap" class="fc-pair-box" style="display:none"><div id="fcPairScanner"></div><p id="fcPairScannerStatus" class="note">Preparando cámara…</p><button type="button" id="fcPairScannerClose">Cerrar cámara</button></div>
+
+        <section id="fcMemberInvitePanel" class="fc-access-card fc-owner-section" style="display:none">
+          <div class="fc-access-card-head"><div><span class="fc-eyebrow">SOLO PROPIETARIO</span><strong>Invitar a un integrante nuevo</strong></div><span class="fc-access-icon">✉️</span></div>
+          <p class="fc-inline-hint">Esto crea una solicitud de integrante nuevo. La persona elige su función (o recibe una preseleccionada) y tú apruebas su acceso. No uses el QR de tu perfil para invitar a otro músico.</p>
+          <label class="fc-field-label" for="fcMemberInviteRole">Tipo de invitación</label>
+          <select id="fcMemberInviteRole"><option value="choose">Enlace general · la persona elige su función</option><option value="voice1">Voz 1 · Director</option><option value="voice2">Voz 2 · Cantante</option><option value="bass">Bajista</option><option value="drummer">Baterista</option><option value="keyboardist">Tecladista</option></select>
+          <button id="fcCreateMemberInvite" class="p" type="button">Crear enlace de invitación</button>
+          <div id="fcMemberInviteOutput" class="fc-invite-output" style="display:none"><label class="fc-field-label" for="fcMemberInviteUrl">Enlace listo para compartir</label><input id="fcMemberInviteUrl" type="text" readonly aria-label="Enlace de invitación"><div class="fc-invite-actions"><button id="fcCopyMemberInvite" type="button" style="display:none">Copiar enlace</button><button id="fcShareMemberInvite" type="button" style="display:none">Compartir…</button></div></div>
+          <p class="fc-inline-hint">Para iPhone: la persona debe abrir Frecuencia Cero desde el icono de inicio y usar ahí su invitación. Safari y la app instalada pueden tener IDs distintos. Si abrió el enlace en Safari, puede copiarlo y pegarlo en la opción «Ya tengo un enlace» de la app instalada.</p>
+          <p id="fcMemberInviteResult" class="note" aria-live="polite"></p>
+        </section>
+
+        <section id="fcJoinRequests" class="fc-access-card" style="display:none"><div class="fc-access-card-head"><div><span class="fc-eyebrow">PENDIENTES DE APROBACIÓN</span><strong>Solicitudes de integrantes</strong></div><span class="fc-access-icon">📝</span></div><div id="fcJoinRequestsList"></div></section>
+        <section id="fcMemberAdmin" class="fc-access-card" style="display:none"><div class="fc-access-card-head"><div><span class="fc-eyebrow">ADMINISTRACIÓN</span><strong>Integrantes y funciones</strong></div><span id="fcOnlineCount" class="fc-inline-hint"></span></div><p class="fc-inline-hint">El propietario administra perfiles y accesos. Cada integrante puede tener varios dispositivos vinculados a su propia función.</p><div id="fcMembers"></div></section>
+        <section id="fcMyDevicesBox" class="fc-access-card" style="display:none"><div class="fc-access-card-head"><div><span class="fc-eyebrow">TUS EQUIPOS</span><strong>Dispositivos vinculados a tu perfil</strong></div><span class="fc-access-icon">💻</span></div><p class="fc-inline-hint">Puedes revocar una laptop, tablet o teléfono sin quitar el acceso de los demás dispositivos de tu perfil.</p><div id="fcMyDevices"></div></section>
+        <section class="fc-access-card"><label class="fc-follow-row"><input type="checkbox" id="fcFollow" checked> Seguir automáticamente la canción que elija Voz 1</label></section>`;
       var insertion = $('mi'); menu.insertBefore(panel, insertion);
     }
     if (!$('fcFirstProfileGate')) {
       var gate = document.createElement('div'); gate.id = 'fcFirstProfileGate'; gate.className = 'fc-profile-gate'; gate.style.display = 'none';
-      gate.innerHTML = '<div class="fc-profile-card"><div class="fc-profile-brand">♫</div><strong class="fc-profile-title">Frecuencia Cero</strong><p id="fcGateRevokedNotice" class="note" style="display:none;font-weight:800;color:#c45b38">Tu acceso a la banda fue retirado. Elige tu función y solicita nuevamente la incorporación.</p><p id="fcGateIntro" class="note">Selecciona tu función. Elegir un perfil no concede acceso: el propietario debe aprobar tu solicitud.</p><div class="fc-profile-grid"><button data-role="voice1"><b>🎤 Voz 1</b><small>Director musical</small></button><button data-role="voice2"><b>🎤 Voz 2</b><small>Cantante</small></button><button data-role="bass"><b>🎸 Bajista</b><small>Acordes</small></button><button data-role="accordionist"><b>🪗 Acordeonista</b><small>Reservado al propietario</small></button><button data-role="drummer"><b>🥁 Baterista</b><small>Seguimiento</small></button><button data-role="keyboardist"><b>🎹 Tecladista</b><small>Teclado / guitarra</small></button></div><p id="fcGateStatus" class="note fc-profile-foot">El catálogo y los eventos se mostrarán únicamente después de que Firebase confirme tu autorización.</p><button type="button" id="fcGateRequestJoin" class="p" style="display:none">Solicitar acceso</button><button type="button" id="fcGateOwnerSetup" class="p" style="display:none">Abrir configuración del propietario</button><div class="note">ID de este dispositivo: <code id="fcGateUid">Preparando…</code> <button type="button" id="fcGateCopyUid">Copiar ID</button></div><button type="button" id="fcProfileGateQr">Ya tengo un QR para vincular</button></div>';
+      gate.innerHTML = `
+        <div class="fc-profile-card">
+          <div class="fc-profile-brand">♫</div>
+          <span class="fc-eyebrow">ACCESO A LA BANDA</span>
+          <strong class="fc-profile-title">Frecuencia Cero</strong>
+          <p id="fcGateRevokedNotice" class="fc-gate-revoked" style="display:none">Tu acceso necesita verificarse.</p>
+          <p id="fcGateIntro" class="note">¿Qué función vas a utilizar en este dispositivo? Seleccionar un perfil no abre el repertorio; primero debes solicitar incorporación y esperar la aprobación del propietario.</p>
+          <div class="fc-profile-grid">
+            <button type="button" data-role="voice1"><b>🎤 Voz 1</b><small>Director musical</small></button>
+            <button type="button" data-role="voice2"><b>🎤 Voz 2</b><small>Cantante</small></button>
+            <button type="button" data-role="bass"><b>🎸 Bajista</b><small>Bajo</small></button>
+            <button type="button" data-role="drummer"><b>🥁 Baterista</b><small>Seguimiento</small></button>
+            <button type="button" data-role="keyboardist"><b>🎹 Tecladista</b><small>Teclado / guitarra</small></button>
+            <button type="button" data-role="accordionist"><b>🪗 Acordeonista</b><small>Propietario técnico</small></button>
+          </div>
+          <p id="fcGateStatus" class="note fc-profile-foot" aria-live="polite">Selecciona tu función para continuar.</p>
+          <button type="button" id="fcGateRequestJoin" class="p fc-gate-primary" style="display:none">Solicitar incorporación</button>
+          <button type="button" id="fcGateOwnerSetup" class="p fc-gate-primary" style="display:none">Abrir configuración del propietario</button>
+          <details class="fc-gate-alt">
+            <summary>Ya tengo una invitación o quiero añadir este dispositivo a mi perfil</summary>
+            <p class="fc-inline-hint">Pega aquí un enlace de invitación para un integrante nuevo o un enlace de dispositivo generado desde otro equipo donde ya tienes acceso. En iPhone, hazlo desde la app abierta en la pantalla de inicio para autorizar su propio ID.</p>
+            <input id="fcGateAccessLinkInput" type="url" placeholder="Pega aquí el enlace completo" autocomplete="url">
+            <button type="button" id="fcGateAccessLinkButton" class="p">Continuar con enlace</button>
+            <p id="fcGateAccessLinkStatus" class="fc-inline-hint" aria-live="polite"></p>
+            <button type="button" id="fcProfileGateQr">Escanear QR de un perfil ya autorizado</button>
+          </details>
+          <details class="fc-gate-tech"><summary>Información técnica de este dispositivo</summary><div class="fc-tech-uid"><code id="fcGateUid">Preparando…</code><button type="button" id="fcGateCopyUid">Copiar ID</button></div></details>
+        </div>`;
       document.body.appendChild(gate);
       if (accessRevoked || accessVerificationPending) {
         gate.style.display = 'grid'; firstProfileGateShown = true;
@@ -2158,16 +2323,15 @@
             if (ownerButton) ownerButton.style.display = '';
             return;
           }
-          if (notice) notice.textContent = hasValidJoinEntryPoint()
-            ? 'Perfil seleccionado: ' + roleName(role) + '. Pulsa Solicitar acceso. No podrás ver canciones ni eventos hasta que el propietario te apruebe.'
-            : 'Perfil seleccionado: ' + roleName(role) + '. Para solicitar acceso necesitas abrir el enlace de invitación que te envió el propietario.';
-          if (requestButton) { requestButton.style.display = hasValidJoinEntryPoint() ? '' : 'none'; requestButton.disabled = !!window.fcJoinRequestPending; requestButton.textContent = window.fcJoinRequestPending ? 'Solicitud pendiente' : 'Solicitar acceso'; }
+          if (notice) notice.textContent = 'Perfil seleccionado: ' + roleName(role) + '. Puedes solicitar incorporación sin QR ni enlace especial. El propietario aprobará el acceso antes de mostrarte el repertorio.';
+          if (requestButton) { requestButton.style.display = canRequestMembership() ? '' : 'none'; requestButton.disabled = !!window.fcJoinRequestPending; requestButton.textContent = window.fcJoinRequestPending ? 'Solicitud pendiente' : 'Solicitar incorporación'; }
           if (ownerButton) ownerButton.style.display = 'none';
           updateSyncButtons();
         };
       });
       var gateOwnerSetup = $('fcGateOwnerSetup'); if (gateOwnerSetup) gateOwnerSetup.onclick = function () { hideFirstProfileGate(); if (typeof window.show === 'function') window.show('vm'); };
-      var gateQr = $('fcProfileGateQr'); if (gateQr) gateQr.onclick = function () { hideFirstProfileGate(); if (typeof window.show === 'function') window.show('vm'); setTimeout(function () { if ($('fcScanDeviceLink')) $('fcScanDeviceLink').click(); }, 250); };
+      var gateQr = $('fcProfileGateQr'); if (gateQr) gateQr.onclick = function () { hideFirstProfileGate(); if (typeof window.show === 'function') window.show('vm'); setTimeout(function () { startPairScanner(); }, 250); };
+      var gateAccessLink = $('fcGateAccessLinkButton'); if (gateAccessLink) gateAccessLink.onclick = continueWithPastedAccessLink;
       var gateRequest = $('fcGateRequestJoin'); if (gateRequest) gateRequest.onclick = function () { if (!selectedProfileRole) { var status = $('fcGateStatus'); if (status) status.textContent = 'Primero selecciona tu función.'; return; } requestJoin(); };
       var gateCopy = $('fcGateCopyUid'); if (gateCopy) gateCopy.onclick = function () { var uid = currentUser && currentUser.uid || ''; if (!uid) return; if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(uid).then(function () { alert('ID copiado: ' + uid); }).catch(function () { alert('ID de este teléfono: ' + uid); }); else alert('ID de este teléfono: ' + uid); };
     }
@@ -2200,6 +2364,8 @@
     if ($('fcCreateBand')) $('fcCreateBand').onclick = handleOwnerBandAction;
     if ($('fcRequestJoin')) $('fcRequestJoin').onclick = requestJoin;
     if ($('fcCreateMemberInvite')) $('fcCreateMemberInvite').onclick = createMemberInviteLink;
+    if ($('fcShareMemberInvite')) $('fcShareMemberInvite').onclick = shareMemberInviteLink;
+    if ($('fcGateAccessLinkButton')) $('fcGateAccessLinkButton').onclick = continueWithPastedAccessLink;
     if ($('fcLinkDevice')) $('fcLinkDevice').onclick = handleGeneratePairQr;
     if ($('fcCheckUpdates')) $('fcCheckUpdates').onclick = checkForAppUpdates;
     if ($('fcScanDeviceLink')) $('fcScanDeviceLink').onclick = startPairScanner;
@@ -2211,7 +2377,7 @@
       selectedProfileRole = role; localStorage.setItem(PROFILE_KEY, role);
       maybeShowFirstProfileGate();
       var gateStatus = $('fcGateStatus'); if (gateStatus) gateStatus.textContent = 'Perfil seleccionado: ' + roleName(role) + '. Solicita acceso y espera la aprobación del propietario.';
-      var gateRequest = $('fcGateRequestJoin'); if (gateRequest) { gateRequest.style.display = (role !== 'accordionist' && hasValidJoinEntryPoint()) ? '' : 'none'; gateRequest.disabled = !!window.fcJoinRequestPending; gateRequest.textContent = window.fcJoinRequestPending ? 'Solicitud pendiente' : 'Solicitar acceso'; }
+      var gateRequest = $('fcGateRequestJoin'); if (gateRequest) { gateRequest.style.display = (role !== 'accordionist' && role !== 'pending' && currentUser && !bandId) ? '' : 'none'; gateRequest.disabled = !!window.fcJoinRequestPending; gateRequest.textContent = window.fcJoinRequestPending ? 'Solicitud pendiente' : 'Solicitar incorporación'; }
       updateSyncButtons();
     };
     if ($('fcProfileSelect')) $('fcProfileSelect').onchange = function () { selectedProfileRole = this.value; updateSyncButtons(); };
@@ -2256,6 +2422,7 @@
       '.fc-member-device{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:5px 8px 8px 28px;font-size:11px;color:var(--mut)}.fc-member-device button{min-height:30px;padding:4px 8px;font-size:11px}.fc-pair-actions{border:1px solid var(--line);border-radius:13px;padding:12px;background:var(--bg);display:flex;flex-direction:column;gap:9px}.fc-pair-actions p{margin:0}.fc-pair-actions button{width:100%;min-height:44px}.fc-pair-box{border:1px solid var(--line);border-radius:13px;padding:12px;background:var(--bg);display:flex;flex-direction:column;gap:9px}.fc-pair-title{font-size:16px;font-weight:900}.fc-pair-qr{display:flex;justify-content:center;align-items:center;background:#fff;border-radius:10px;padding:12px;min-height:230px}.fc-pair-qr img{max-width:100%;height:auto}.fc-pair-url{font-size:10px;color:var(--mut);overflow-wrap:anywhere;user-select:text}.fc-pair-box button{width:100%}' +
       '.fc-live-row-current{outline:1px solid color-mix(in srgb,var(--acc) 25%,transparent);outline-offset:3px;border-radius:7px}.fc-profile-gate{position:fixed;inset:0;z-index:2000;display:grid;place-items:center;padding:18px;background:var(--bg);backdrop-filter:none}.fc-profile-card{width:min(100%,480px);max-height:90dvh;overflow:auto;background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:22px;padding:20px;box-shadow:0 18px 60px rgba(0,0,0,.3);display:flex;flex-direction:column;gap:12px}.fc-profile-brand{width:48px;height:48px;border-radius:15px;display:grid;place-items:center;background:var(--acc);color:var(--accfg);font-size:28px}.fc-profile-title{font-size:24px}.fc-profile-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.fc-profile-grid button{min-height:76px;text-align:left;display:flex;flex-direction:column;gap:4px;padding:11px}.fc-profile-grid button b{font-size:14px}.fc-profile-grid button small{color:var(--mut);font-size:11px}.fc-profile-foot{margin:0}.fc-request-row{display:grid;grid-template-columns:minmax(0,1fr);gap:9px;align-items:stretch}.fc-request-info{min-width:0;width:100%}.fc-request-info strong{white-space:normal;overflow-wrap:normal;word-break:normal}.fc-request-info small{white-space:normal;overflow-wrap:anywhere;word-break:normal;line-height:1.35}.fc-request-actions{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:7px;align-items:center;min-width:0}.fc-request-actions select{width:100%;min-width:0;max-width:100%;font-size:12px;padding:7px}.fc-request-actions button{min-width:0;white-space:nowrap}.fc-request-reject{padding-left:10px;padding-right:10px}.fc-admin-member-row{min-width:0}.fc-admin-member-row .fc-member-info{min-width:0}.fc-admin-member-row .fc-member-info small{overflow-wrap:normal;word-break:normal;line-height:1.35}.fc-section-control{display:grid;grid-template-columns:minmax(0,1fr) minmax(145px, .9fr);align-items:center;gap:9px;padding:8px 4px 3px 29px}.fc-section-key{font-size:11px;color:var(--mut);font-weight:800}.fc-section-control label{display:flex;align-items:center;gap:7px;justify-content:flex-end;font-size:11px;color:var(--mut);font-weight:800}.fc-section-control select{width:100%;min-width:0;min-height:36px;font-size:12px;padding:5px}.fc-category-filters{display:flex;gap:7px;overflow-x:auto;padding:9px 12px 4px;scrollbar-width:none}.fc-category-filters::-webkit-scrollbar{display:none}.fc-category-filters button{flex:1 0 auto;min-height:35px;padding:6px 12px;border-radius:11px;font-size:12px;font-weight:850;white-space:nowrap;background:var(--bg);color:var(--mut);box-shadow:none}.fc-category-filters button.active{background:var(--acc);color:var(--accfg)}.fc-mini-player{position:fixed;left:10px;right:10px;bottom:calc(8px + env(safe-area-inset-bottom));z-index:1100;display:flex;flex-direction:column;gap:5px;padding:9px 11px 7px;border:1px solid color-mix(in srgb,var(--acc) 38%,var(--line));border-radius:14px;background:color-mix(in srgb,var(--card) 94%,transparent);color:var(--fg);box-shadow:0 8px 26px rgba(0,0,0,.18);backdrop-filter:blur(12px)}body.fc-reader-open .fc-mini-player{bottom:calc(98px + env(safe-area-inset-bottom))}.fc-mini-top{display:flex;align-items:center;gap:6px;font-size:10px;font-weight:900;letter-spacing:.06em;color:var(--mut);min-width:0}.fc-mini-live-dot{width:8px;height:8px;border-radius:50%;background:#18a66a;flex:0 0 auto}.fc-mini-player.is-paused .fc-mini-live-dot{background:#d49b2e}.fc-mini-event{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;font-weight:700;letter-spacing:0}.fc-mini-state{white-space:nowrap}.fc-mini-main{display:flex;align-items:center;gap:9px;min-width:0}.fc-mini-copy{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}.fc-mini-copy strong{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.fc-mini-copy span{font-size:11px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.fc-mini-main button{min-height:35px;padding:6px 9px;font-size:11px;font-weight:850;white-space:nowrap}.fc-mini-player.is-free{border-color:color-mix(in srgb,#d49b2e 55%,var(--line))}.fc-mini-progress-track{height:3px;background:var(--line);border-radius:99px;overflow:hidden}.fc-mini-progress-track span{height:100%;display:block;width:0;background:var(--acc);transition:width .2s}.fc-mini-progress-text{position:absolute;right:11px;top:8px;font-size:9px;color:var(--mut);display:none}.fc-sync-panel .fc-request-row{display:grid;grid-template-columns:minmax(0,1fr);}.fc-sync-panel .fc-request-actions{grid-template-columns:minmax(0,1fr) auto auto}#list{padding-bottom:100px}.event-list{padding-bottom:100px}@media(max-width:480px){.fc-sync-panel .fc-request-actions{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.fc-sync-panel .fc-request-actions select{grid-column:1/-1}.fc-sync-panel .fc-request-actions button{width:100%;min-height:39px}.fc-sync-panel .fc-admin-member-row{display:grid;grid-template-columns:minmax(0,1fr);gap:7px}.fc-sync-panel .fc-admin-member-row select{width:100%;min-width:0;max-width:100%}.fc-sync-panel .fc-admin-member-row button{width:100%}.fc-section-control{grid-template-columns:1fr;gap:5px;padding-left:29px}.fc-section-control label{justify-content:space-between}.fc-section-control select{max-width:100%}}' +
       '.fc-pair-invite-overlay{position:fixed;inset:0;z-index:3000;display:grid;place-items:center;padding:18px;background:rgba(8,13,22,.72);padding-top:calc(18px + env(safe-area-inset-top));padding-bottom:calc(18px + env(safe-area-inset-bottom))}.fc-pair-invite-card{width:min(100%,440px);max-height:calc(100dvh - 36px - env(safe-area-inset-top) - env(safe-area-inset-bottom));overflow:auto;background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:22px;padding:22px;box-shadow:0 20px 70px rgba(0,0,0,.38);display:flex;flex-direction:column;gap:13px}.fc-pair-invite-card h2{font-size:22px;line-height:1.15;margin:0}.fc-pair-invite-card p{margin:0;font-size:14px;line-height:1.45}.fc-pair-invite-note{padding:10px 12px;border-radius:11px;background:var(--bg);color:var(--mut);font-size:12px;line-height:1.45}.fc-pair-invite-status{padding:10px 12px;border-radius:10px;background:var(--bg);font-size:13px!important;font-weight:700}.fc-pair-invite-card button{width:100%;min-height:46px}.fc-pair-invite-card button:disabled{opacity:.55;cursor:wait}';
+    css += '.fc-sync-panel{max-width:980px;margin:0 auto;padding:12px 14px 28px;display:flex;flex-direction:column;gap:12px}.fc-panel-head{align-items:flex-start;padding:8px 2px}.fc-panel-head strong{font-size:20px;letter-spacing:-.02em}.fc-panel-head .note{max-width:680px;line-height:1.45;margin:5px 0 0}.fc-access-card{border:1px solid var(--line);border-radius:17px;background:var(--card);padding:16px;display:flex;flex-direction:column;gap:11px;min-width:0;box-shadow:0 4px 18px rgba(0,0,0,.045)}.fc-access-card-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.fc-access-card-head>div{display:flex;flex-direction:column;gap:3px;min-width:0}.fc-access-card-head strong{font-size:16px}.fc-eyebrow{font-size:10px;letter-spacing:.11em;font-weight:900;color:var(--mut)}.fc-access-badge{font-size:10px;font-weight:900;border-radius:999px;padding:6px 9px;white-space:nowrap;background:var(--bg);border:1px solid var(--line)}.fc-access-badge.is-ok{color:#148451;background:rgba(20,132,81,.1);border-color:rgba(20,132,81,.25)}.fc-access-badge.is-owner{color:var(--acc);background:color-mix(in srgb,var(--acc) 10%,var(--card))}.fc-access-badge.is-pending{color:var(--mut)}.fc-current-profile{font-size:15px;font-weight:800;margin:0;color:var(--fg)}.fc-profile-editor,.fc-owner-create{display:flex;flex-direction:column;gap:8px}.fc-tech-details,.fc-gate-tech{border-top:1px solid var(--line);padding-top:9px;margin-top:2px}.fc-tech-details summary,.fc-gate-tech summary,.fc-gate-alt summary{cursor:pointer;font-size:12px;font-weight:800;color:var(--mut);padding:4px 0}.fc-tech-uid{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px}.fc-tech-uid code{font-size:10px;overflow-wrap:anywhere;flex:1;min-width:0}.fc-tech-uid button{min-height:30px;padding:4px 8px;font-size:11px}.fc-device-access{border-color:color-mix(in srgb,var(--acc) 28%,var(--line))}.fc-access-icon{display:grid;place-items:center;width:36px;height:36px;border-radius:11px;background:var(--bg);font-size:20px}.fc-device-access .fc-secondary-action{width:100%;min-height:46px}.fc-inline-hint{font-size:11px;color:var(--mut);line-height:1.45;margin:0}.fc-owner-section{gap:12px}.fc-invite-output{display:flex;flex-direction:column;gap:8px;padding:11px;border-radius:12px;background:var(--bg);border:1px solid var(--line)}.fc-invite-output input{width:100%;min-width:0;font-size:12px}.fc-invite-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}.fc-invite-actions button{min-height:40px}.fc-pair-share-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}.fc-pair-share-actions button{min-height:42px}.fc-profile-card{width:min(100%,520px);max-height:min(92dvh,900px);padding:24px;gap:13px}.fc-profile-card .fc-profile-title{line-height:1.14;letter-spacing:-.025em}.fc-profile-card .fc-eyebrow{margin-top:2px}.fc-profile-grid button{border:1px solid var(--line);border-radius:13px;background:var(--bg);color:var(--fg);transition:border-color .15s,background .15s,transform .15s}.fc-profile-grid button.selected{border:2px solid var(--acc);background:color-mix(in srgb,var(--acc) 10%,var(--card));transform:translateY(-1px)}.fc-profile-grid button small{line-height:1.25}.fc-gate-primary{width:100%;min-height:48px;font-size:15px;font-weight:900}.fc-profile-foot{padding:10px 12px;border-radius:11px;background:var(--bg);line-height:1.45}.fc-gate-revoked{padding:10px 12px;background:rgba(190,65,50,.1);border:1px solid rgba(190,65,50,.22);border-radius:11px;color:#c45b38;font-weight:800}.fc-gate-alt{border:1px solid var(--line);border-radius:13px;padding:10px 12px;background:var(--bg);display:flex;flex-direction:column;gap:9px}.fc-gate-alt[open]{background:var(--card)}.fc-gate-alt p{margin:0;line-height:1.45}.fc-gate-alt input{width:100%;min-width:0;min-height:42px}.fc-gate-alt button{width:100%;min-height:42px}.fc-gate-alt #fcProfileGateQr{background:transparent;border:1px solid var(--line);color:var(--fg)}#fcGateAccessLinkStatus{overflow-wrap:anywhere}@media(max-width:560px){.fc-sync-panel{padding:8px 10px 24px}.fc-access-card{padding:13px;border-radius:14px}.fc-access-card-head{align-items:flex-start}.fc-invite-actions,.fc-pair-share-actions{grid-template-columns:1fr}.fc-profile-card{padding:18px;max-height:94dvh}.fc-profile-grid{gap:7px}.fc-profile-grid button{min-height:70px;padding:9px}.fc-profile-grid button b{font-size:13px}}';
     var style = document.createElement('style'); style.textContent = css; document.head.appendChild(style);
   }
 

@@ -1,9 +1,36 @@
-Frecuencia Cero V24 — Acceso controlado e invitaciones por enlace
+FRECUENCIA CERO V25 — ACCESO, PERFILES E INVITACIONES
 
-- Gate obligatorio para navegadores sin membresía Firebase verificada.
-- La URL pública no concede acceso y no presenta un botón de solicitud sin invitación.
-- Enlace general: invitado selecciona función y solicita; el propietario aprueba. Reutilizable.
-- Enlace con función preasignada: invitado recibe un rol sugerido, solicita y espera aprobación. Token de un solo uso, 7 días.
-- QR sigue sirviendo para vincular dispositivos adicionales a un integrante autorizado.
-- El catálogo estático se retiró del HTML público actual; las letras se cargan desde Realtime Database tras autorización.
-- Se conserva UID propietario y band ID actuales.
+CAMBIOS PRINCIPALES
+- Menú Más rediseñado en tarjetas: perfil actual, dispositivos de ese perfil, invitar integrante, solicitudes y administración.
+- Los identificadores técnicos quedan dentro de "Información técnica del dispositivo".
+- Pantalla obligatoria de selección para cada navegador/PWA sin membresía Firebase verificada.
+- Botón "Solicitar incorporación" después de elegir función. No se necesita QR para solicitar un perfil nuevo; el propietario debe aprobarlo antes de abrir canciones/eventos.
+- Enlace general y enlace con función preseleccionada; ambos crean solicitud, nunca otorgan acceso directamente.
+- QR/enlace de dispositivo solo duplica un perfil que ya está autorizado. No crea integrante nuevo ni requiere otra aprobación.
+- Antes de confirmar un QR/enlace de dispositivo, se muestra el nombre del perfil destino.
+- Campo para pegar enlaces en la puerta de acceso: permite usar desde la PWA de iPhone un enlace abierto/copied en Safari, aunque ambos contextos tengan UID distintos.
+- La sección de versión/actualización sigue en el pie de Más; sin IDs HTML duplicados.
+
+FIREBASE
+- No requiere nuevas reglas si ya están publicadas las reglas V24 de Realtime Database y Authentication anónima sigue habilitada.
+- Las reglas V24 permiten a cada UID crear su propia solicitud pendiente, pero no leer catálogo/eventos hasta que el propietario agregue su membresía.
+- UID propietario: qZCvhHTK3MUhcABIlZlRyrqHKdC2.
+- Band ID: frecuencia-cero-main.
+
+ACTUALIZACIÓN
+1. Descomprime y sube todos los archivos a la raíz de GitHub Pages, reemplazando los anteriores.
+2. Haz Commit changes en main.
+3. En cada dispositivo autorizado entra a Más > Buscar actualizaciones.
+4. No borres datos de Safari ni de la PWA.
+
+FLUJOS
+- Integrante nuevo: URL pública/invitación > selecciona función > Solicitar incorporación > el propietario aprueba. Acceso solo tras aprobación.
+- Invitación con función: el propietario preselecciona función; el invitado abre el enlace en el navegador/PWA que usará, o pega el enlace en la app instalada; solicita y espera aprobación.
+- iPhone Safari vs PWA: pueden tener UIDs distintos. Si el miembro ya fue aprobado en Safari y luego abre la PWA instalada, genera un enlace de dispositivo desde la sesión Safari de ESE miembro y pega ese enlace en la PWA. El QR del Acordeonista siempre añade el perfil Acordeonista; no usarlo para invitar a Voz 2.
+- Dispositivo alterno: un miembro autorizado abre Más > Añadir otro dispositivo > Generar QR/enlace para este perfil. Abre/pega ese enlace en el dispositivo nuevo y confirma el perfil que se muestra. No hace falta aprobar otra vez.
+
+PRUEBAS
+1. Abrir URL pública en incógnito: debe mostrar selección y no mostrar canciones.
+2. Elegir Voz 2 y pulsar Solicitar incorporación: el propietario recibe solicitud.
+3. Aprobar Voz 2: solo entonces se abre catálogo.
+4. En sesión autorizada Voz 2, crear enlace de dispositivo; pegarlo en la PWA nueva y confirmar que el destino diga Voz 2.

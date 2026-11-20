@@ -1,8 +1,8 @@
-const CACHE_NAME = 'frecuencia-cero-shell-v24-auth-gate-member-invites-no-public-catalog';
+const CACHE_NAME = 'frecuencia-cero-shell-v25-onboarding-invite-device-roles';
 const APP_FILES = [
   './',
   './index.html',
-  './fc-sync.js',
+  './fc-sync.js?v=25',
   './manifest.webmanifest',
   './icon-192.png',
   './icon-512.png',
