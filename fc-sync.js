@@ -4,7 +4,7 @@
 (function () {
   'use strict';
 
-  var APP_VERSION = 'V26';
+  var APP_VERSION = 'V27';
   var CFG_KEY = 'fc_firebase_config_v1';
   var BAND_KEY = 'fc_band_id_v1';
   var PROFILE_KEY = 'fc_device_profile_v1';
@@ -69,6 +69,8 @@
   var inviteCode = '';
   function inviteStorageKey() { return 'fc_invite_code_v1:' + bandId + ':' + (currentUser ? currentUser.uid : ''); }
   var liveState = null;
+  var activeLiveEventOnThisClient = '';
+  var lastEndedLiveEventKey = '';
   var followDirector = localStorage.getItem(FOLLOW_KEY) !== 'false';
   var instrumentOverrides = readOverrides();
   var applyingRemote = false;
@@ -146,6 +148,8 @@
   }
   function canManageCatalog() { return isConnected() && isTechnicalOwner(); }
   function canManageEvents() { return isConnected() && (isTechnicalOwner() || memberRole === 'voice1'); }
+  function isLiveSessionActive(state) { state = state === undefined ? liveState : state; return !!(state && state.eventId && state.songId && state.status !== 'ended' && !state.endedAt); }
+  function canEndLiveEvent() { return isConnected() && canManageEvents(); }
   function roleName(role) { return ROLE_LABELS[role] || 'Integrante'; }
   function canRequestMembership() {
     return !!(currentUser && db && !bandId && selectedProfileRole && selectedProfileRole !== 'accordionist' && selectedProfileRole !== 'pending' && !(accessRevoked && revocationMode === 'devices'));
@@ -1566,7 +1570,7 @@
   }
   function renderLiveBanner() {
     var banner = $('fcLiveBanner'); if (!banner) return;
-    if (!liveState || !liveState.eventId || !liveState.songId) { banner.style.display = 'none'; return; }
+    if (!isLiveSessionActive()) { banner.style.display = 'none'; return; }
     var ev = (window.events || []).find(function (item) { return item.id === liveState.eventId; });
     var s = window.find(liveState.songId);
     if (!ev || !s) { banner.style.display = 'none'; return; }
@@ -1591,7 +1595,7 @@
     if (!mini) return;
     var song = liveState && liveState.songId ? window.find(liveState.songId) : null;
     var ev = liveState && liveState.eventId ? (window.events || []).find(function (x) { return x.id === liveState.eventId; }) : null;
-    if (!isConnected() || !song || !ev) { mini.style.display = 'none'; return; }
+    if (!isConnected() || !isLiveSessionActive() || !song || !ev) { mini.style.display = 'none'; return; }
     mini.style.display = 'flex';
     setText('fcMiniEvent', ev.name || 'Evento en vivo');
     setText('fcMiniSong', song.title || 'Canción actual');
@@ -1625,11 +1629,12 @@
     mini.classList.toggle('is-free', memberRole !== 'voice1' && (!followDirector || browseOverride));
     mini.classList.toggle('is-paused', paused);
     var queueBtn = $('fcMiniQueue'); if (queueBtn) queueBtn.style.display = ev ? '' : 'none';
+    var endBtn = $('fcMiniEnd'); if (endBtn) endBtn.style.display = canEndLiveEvent() ? '' : 'none';
   }
   function renderLiveBanner() {
     var banner = $('fcLiveBanner');
     if (banner) {
-      if (!liveState || !liveState.eventId || !liveState.songId) banner.style.display = 'none';
+      if (!isLiveSessionActive()) banner.style.display = 'none';
       else {
         var ev = (window.events || []).find(function (item) { return item.id === liveState.eventId; });
         var s = window.find(liveState.songId);
@@ -1662,8 +1667,63 @@
       rd.scrollTo({ top: Math.max(0, Math.min(maxTop, top)), behavior: 'smooth' });
     }
   }
+  function handleLiveEventEnded(endedState) {
+    var eventId = (endedState && endedState.eventId) || activeLiveEventOnThisClient;
+    if (!eventId) { renderLiveBanner(); return; }
+    var endKey = eventId + ':' + String((endedState && endedState.endedAt) || 'ended');
+    var wasActiveHere = activeLiveEventOnThisClient === eventId;
+    var readerWasOnEvent = !!(window.currentEventId === eventId && $('vr') && $('vr').classList.contains('on'));
+    if (!wasActiveHere && !readerWasOnEvent) { renderLiveBanner(); return; }
+    if (lastEndedLiveEventKey === endKey) { renderLiveBanner(); return; }
+    lastEndedLiveEventKey = endKey;
+    activeLiveEventOnThisClient = '';
+    if (speechWanted) stopSpeechFollow('Evento finalizado. El micrófono se apagó.', false);
+    if (scrollPublishTimer) { clearTimeout(scrollPublishTimer); scrollPublishTimer = null; }
+    if (window.stopAll) window.stopAll();
+    speechResumeAfterPause = false; speechCursor = -1; speechCandidate = -1; speechCandidateHits = 0; speechLastTranscript = '';
+    lastHandledSong = ''; lastRemotePositionKey = ''; lastPublishedPositionKey = '';
+    renderLiveBanner();
+    var endedEvent = window.findEvent ? window.findEvent(eventId) : null;
+    if (readerWasOnEvent) {
+      if (endedEvent && window.renderEventPlaylist) { window.currentEventId = eventId; window.renderEventPlaylist(); window.show('vplaylist'); }
+      else if (window.show) window.show('vl');
+    }
+    var eventName = endedEvent && endedEvent.name ? endedEvent.name : 'El evento';
+    setStatus(eventName + ' finalizado. Se cerró el reproductor en los dispositivos conectados; el repertorio permanece guardado.', 'success');
+  }
+  function endLiveEvent() {
+    if (!canEndLiveEvent()) { alert('Solo el propietario técnico o Voz 1 · Director pueden terminar el evento.'); return; }
+    if (!isLiveSessionActive()) { setStatus('No hay un evento en vivo para terminar.', 'warning'); renderMiniPlayer(); return; }
+    var eventId = liveState.eventId;
+    var ev = window.findEvent ? window.findEvent(eventId) : null;
+    var name = ev && ev.name ? ev.name : 'este evento';
+    if (!confirm('¿Terminar "' + name + '" para todos los dispositivos?\n\nSe detendrá el seguimiento, se cerrará el reproductor y todos volverán al repertorio. El evento y sus canciones NO se eliminarán.')) return;
+    var button = $('fcMiniEnd');
+    if (button) { button.disabled = true; button.textContent = 'Finalizando…'; }
+    var endedPayload = {
+      status: 'ended', eventId: eventId, endedAt: firebase.database.ServerValue.TIMESTAMP,
+      endedBy: currentUser.uid, endedByRole: memberRole,
+      endedByName: roleName(memberRole), lastSongId: liveState.songId || null
+    };
+    db.ref(bandPath('live')).set(endedPayload).then(function () {
+      liveState = Object.assign({}, endedPayload, { endedAt: Date.now() });
+      handleLiveUpdate();
+    }).catch(function (err) {
+      setStatus('No se pudo terminar el evento: ' + (err && err.message ? err.message : 'error de Firebase'), 'error');
+      alert('Firebase no permitió terminar el evento. No se cerró para los demás dispositivos.\n\n' + (err && err.message ? err.message : 'Comprueba los permisos y la conexión.'));
+    }).finally(function () {
+      if (button) { button.disabled = false; button.textContent = '■ Terminar evento'; }
+    });
+  }
   function handleLiveUpdate() {
-    if (!liveState || !liveState.eventId || !liveState.songId) { renderLiveBanner(); return; }
+    if (!isLiveSessionActive()) {
+      renderLiveBanner();
+      if (liveState && liveState.eventId && (liveState.status === 'ended' || liveState.endedAt)) handleLiveEventEnded(liveState);
+      else if (!liveState && activeLiveEventOnThisClient) handleLiveEventEnded({ eventId: activeLiveEventOnThisClient });
+      return;
+    }
+    activeLiveEventOnThisClient = liveState.eventId;
+    lastEndedLiveEventKey = '';
     renderLiveBanner();
     if (memberRole === 'voice1') return;
     var s = window.find(liveState.songId); if (!s) return;
@@ -1690,9 +1750,10 @@
   async function setLiveSong(eventId, songId, index) {
     if (memberRole !== 'voice1' || !db || !bandId) { alert('Solo Voz 1 · Director puede cambiar la canción compartida.'); return; }
     try {
-      var payload = { eventId: eventId, songId: songId, position: index, rowIndex: 0, chordIndex: -1, paused: true, changedAt: firebase.database.ServerValue.TIMESTAMP, changedBy: currentUser.uid, changedByName: currentUser.displayName || 'Voz 1' };
+      var payload = { status: 'active', eventId: eventId, songId: songId, position: index, rowIndex: 0, chordIndex: -1, paused: true, changedAt: firebase.database.ServerValue.TIMESTAMP, changedBy: currentUser.uid, changedByName: currentUser.displayName || 'Voz 1' };
       await db.ref(bandPath('live')).set(payload);
       liveState = Object.assign({}, payload, { changedAt: Date.now() });
+      activeLiveEventOnThisClient = eventId; lastEndedLiveEventKey = '';
       window.currentEventId = eventId; lastHandledSong = eventId + ':' + songId; lastRemotePositionKey = '';
       lastPublishedPositionKey = '';
       speechCursor = -1; speechCandidate = -1; speechCandidateHits = 0; speechLastTranscript = '';
@@ -2349,7 +2410,7 @@
       var main = document.createElement('button'); main.className = 'event-folder-main';
       var name = document.createElement('span'); name.className = 'event-folder-name'; name.textContent = ev.name || 'Evento sin nombre';
       var meta = document.createElement('span'); meta.className = 'event-folder-meta';
-      var isLive = liveState && liveState.eventId === ev.id;
+      var isLive = isLiveSessionActive() && liveState.eventId === ev.id;
       meta.textContent = (ev.songIds || []).length + ' canciones · aprox. ' + window.formatDurationLong(window.eventDuration(ev.songIds)) + (isLive ? ' · EN VIVO' : '');
       main.append(name, meta); main.onclick = function () { window.openEvent(ev.id); };
       row.append(icon, main);
@@ -2391,7 +2452,7 @@
     }
     l.innerHTML = '';
     if (!ev.songIds || !ev.songIds.length) { var empty = document.createElement('div'); empty.className = 'playlist-empty'; empty.textContent = 'Esta carpeta todavía no tiene canciones. Usa Añadir para agregarlas desde el catálogo.'; l.appendChild(empty); renderMiniPlayer(); return; }
-    var visibleCount = 0, currentIndex = liveState && liveState.eventId === ev.id ? ev.songIds.indexOf(liveState.songId) : -1;
+    var visibleCount = 0, currentIndex = isLiveSessionActive() && liveState.eventId === ev.id ? ev.songIds.indexOf(liveState.songId) : -1;
     if (activeFilter !== 'all' && isConnected() && canManageEvents()) {
       var filterNote = document.createElement('p'); filterNote.className = 'fc-inline-hint'; filterNote.textContent = 'Para reordenar la cola completa, selecciona “Todas”.'; l.appendChild(filterNote);
     }
@@ -2589,7 +2650,7 @@
         return;
       }
       var registration = await navigator.serviceWorker.getRegistration('./');
-      if (!registration) registration = await navigator.serviceWorker.register('./sw.js?v=26');
+      if (!registration) registration = await navigator.serviceWorker.register('./sw.js?v=27');
       var controllerChanged = new Promise(function (resolve) {
         var finished = false;
         var finish = function () {
@@ -2766,7 +2827,7 @@
     }
     if (!$('fcMiniPlayer')) {
       var mini = document.createElement('aside'); mini.id = 'fcMiniPlayer'; mini.className = 'fc-mini-player'; mini.style.display = 'none';
-      mini.innerHTML = '<div class="fc-mini-top"><span class="fc-mini-live-dot"></span><span id="fcMiniMode">EN VIVO</span><span class="fc-mini-event" id="fcMiniEvent"></span><span class="fc-mini-state" id="fcMiniState"></span></div><div class="fc-mini-main"><div class="fc-mini-copy"><strong id="fcMiniSong">—</strong><span id="fcMiniLine">Esperando canción del director…</span></div><button type="button" id="fcMiniReturn">Ver en vivo</button></div><div class="fc-mini-next"><span>SIGUIENTE</span><strong id="fcMiniNextSong">Fin del repertorio</strong><small id="fcMiniNextMeta"></small></div><div class="fc-mini-controls"><button type="button" id="fcMiniPrev" title="Canción anterior">⏮</button><button type="button" id="fcMiniPause" title="Pausar o reanudar">Ⅱ Pausar</button><button type="button" id="fcMiniNext" class="p" title="Siguiente canción">⏭ Siguiente</button><button type="button" id="fcMiniQueue" title="Abrir repertorio">☷ Lista</button></div><div class="fc-mini-progress-track"><span id="fcMiniProgress"></span></div><span class="fc-mini-progress-text" id="fcMiniProgressText"></span>';
+      mini.innerHTML = '<div class="fc-mini-top"><span class="fc-mini-live-dot"></span><span id="fcMiniMode">EN VIVO</span><span class="fc-mini-event" id="fcMiniEvent"></span><span class="fc-mini-state" id="fcMiniState"></span></div><div class="fc-mini-main"><div class="fc-mini-copy"><strong id="fcMiniSong">—</strong><span id="fcMiniLine">Esperando canción del director…</span></div><button type="button" id="fcMiniReturn">Ver en vivo</button></div><div class="fc-mini-next"><span>SIGUIENTE</span><strong id="fcMiniNextSong">Fin del repertorio</strong><small id="fcMiniNextMeta"></small></div><div class="fc-mini-controls"><button type="button" id="fcMiniPrev" title="Canción anterior">⏮</button><button type="button" id="fcMiniPause" title="Pausar o reanudar">Ⅱ Pausar</button><button type="button" id="fcMiniNext" class="p" title="Siguiente canción">⏭ Siguiente</button><button type="button" id="fcMiniQueue" title="Abrir repertorio">☷ Lista</button></div><div class="fc-mini-end-row"><button type="button" id="fcMiniEnd" class="fc-mini-end" title="Terminar el evento para todos">■ Terminar evento</button></div><div class="fc-mini-progress-track"><span id="fcMiniProgress"></span></div><span class="fc-mini-progress-text" id="fcMiniProgressText"></span>';
       document.body.appendChild(mini);
     }
     var listView = $('vl');
@@ -2830,6 +2891,7 @@
     if ($('fcMiniNext')) $('fcMiniNext').onclick = function () { navigateLiveSong(1); };
     if ($('fcMiniPause')) $('fcMiniPause').onclick = toggleLivePause;
     if ($('fcMiniQueue')) $('fcMiniQueue').onclick = function () { if (liveState && liveState.eventId) window.openEvent(liveState.eventId); };
+    if ($('fcMiniEnd')) $('fcMiniEnd').onclick = endLiveEvent;
     if ($('fcVoiceStart')) $('fcVoiceStart').onclick = startSpeechFollow;
     if ($('fcVoiceStop')) $('fcVoiceStop').onclick = function () { stopSpeechFollow('Micrófono apagado. El avance manual sigue disponible.', false); };
     if ($('fcVoicePrevLine')) $('fcVoicePrevLine').onclick = function () { advanceDirectorLine(-1); };
@@ -2855,7 +2917,7 @@
   function addStyles() {
     var css = '' +
       '.fc-voice-panel{margin:0 10px 8px;padding:12px;border:1px solid color-mix(in srgb,var(--acc) 30%,var(--line));border-radius:14px;background:color-mix(in srgb,var(--acc) 5%,var(--card));display:flex;flex-direction:column;gap:8px}.fc-voice-panel-head{display:flex;align-items:center;justify-content:space-between;gap:8px}.fc-voice-panel-head>div{display:flex;flex-direction:column;gap:3px}.fc-voice-panel-head strong{font-size:13px}.fc-voice-panel-head small{font-size:9px;letter-spacing:.1em;font-weight:900;color:var(--mut)}.fc-voice-indicator{display:grid;place-items:center;width:34px;height:34px;border-radius:11px;background:var(--bg);font-size:18px}.fc-voice-panel.is-listening .fc-voice-indicator{background:rgba(22,163,106,.12);box-shadow:0 0 0 4px rgba(22,163,106,.06)}.fc-voice-status{margin:0;padding:8px 10px;border-radius:9px;background:var(--bg);font-size:11px;line-height:1.4;color:var(--mut)}.fc-voice-status[data-kind=success]{color:#168451}.fc-voice-status[data-kind=error]{color:#bd3e35}.fc-voice-status[data-kind=warning]{color:#9a6a00}.fc-voice-actions,.fc-voice-manual{display:grid;grid-template-columns:1fr 1fr;gap:7px}.fc-voice-actions button,.fc-voice-manual button{min-height:38px;padding:7px 9px;font-size:11px;font-weight:850}.fc-voice-manual button{background:var(--bg)}.fc-voice-panel .fc-inline-hint{font-size:10px;margin:0}.fc-live-queue-row{display:flex;align-items:center;gap:7px;min-width:0}.fc-live-queue-handle{width:30px;min-width:30px;min-height:38px;padding:0;border:0!important;background:transparent!important;box-shadow:none!important;color:var(--mut);font-size:20px;font-weight:900;letter-spacing:-3px;touch-action:none;user-select:none;-webkit-user-select:none;cursor:grab}.fc-live-queue-handle:active,.fc-live-queue-handle.is-dragging{color:var(--acc);cursor:grabbing}.fc-live-queue-row.is-drag-source{opacity:.45}.fc-live-queue-row.is-drop-target{outline:2px dashed var(--acc);background:color-mix(in srgb,var(--acc) 7%,var(--card))}.fc-queue-badge{font-size:9px;font-weight:950;letter-spacing:.05em;border-radius:7px;padding:5px 6px;white-space:nowrap}.fc-queue-badge.current{background:rgba(22,163,106,.12);color:#168451}.fc-queue-badge.next{background:color-mix(in srgb,var(--acc) 11%,var(--card));color:var(--acc)}.fc-queue-remove{min-width:30px!important;width:30px;min-height:32px!important;padding:3px!important;border-radius:8px!important;color:var(--mut)}.fc-queue-remove:disabled{opacity:.35}.fc-queue-tools{margin:8px 12px 6px;padding:11px;border:1px solid var(--line);border-radius:13px;background:var(--card)}.fc-queue-tools-head{display:flex;align-items:center;justify-content:space-between;gap:10px}.fc-queue-tools-head>div{display:flex;flex-direction:column;gap:3px;min-width:0}.fc-queue-tools-head strong{font-size:13px}.fc-queue-tools-head small{font-size:10px;color:var(--mut)}.fc-queue-tools-head button{min-height:35px;padding:6px 10px;font-size:11px}.fc-queue-add-panel{display:flex;flex-direction:column;gap:8px;padding-top:10px}.fc-queue-add-panel[hidden]{display:none}.fc-queue-add-panel input{min-height:38px;font-size:12px}.fc-queue-search-results{display:flex;flex-direction:column;gap:5px;max-height:220px;overflow:auto}.fc-queue-search-row{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--line);font-size:11px}.fc-queue-search-row span{flex:1;min-width:0;line-height:1.35}.fc-queue-search-row button{min-height:32px;padding:5px 9px;font-size:10px}' +
-      '.fc-mini-next{display:flex;align-items:center;gap:8px;min-width:0;padding:5px 7px;border-radius:8px;background:var(--bg)}.fc-mini-next>span{font-size:8px;letter-spacing:.09em;font-weight:950;color:var(--mut);white-space:nowrap}.fc-mini-next strong{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1}.fc-mini-next small{font-size:9px;color:var(--mut);white-space:nowrap}.fc-mini-controls{display:flex;align-items:center;justify-content:center;gap:7px}.fc-mini-controls button{min-height:32px;padding:5px 9px;font-size:10px;font-weight:850;border-radius:9px}.fc-mini-controls button:disabled{opacity:.35}.fc-mini-player{gap:6px}.fc-mini-player .fc-mini-main button{min-height:32px}.fc-live-queue-row .playlist-open{flex:1;min-width:0}.fc-live-queue-row .playlist-open strong,.fc-live-queue-row .playlist-open small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.fc-live-queue-row .fc-play-song{flex:0 0 auto;min-width:62px}' +
+      '.fc-mini-next{display:flex;align-items:center;gap:8px;min-width:0;padding:5px 7px;border-radius:8px;background:var(--bg)}.fc-mini-next>span{font-size:8px;letter-spacing:.09em;font-weight:950;color:var(--mut);white-space:nowrap}.fc-mini-next strong{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1}.fc-mini-next small{font-size:9px;color:var(--mut);white-space:nowrap}.fc-mini-controls{display:flex;align-items:center;justify-content:center;gap:7px}.fc-mini-controls button{min-height:32px;padding:5px 9px;font-size:10px;font-weight:850;border-radius:9px}.fc-mini-controls button:disabled{opacity:.35}.fc-mini-end-row{display:flex;justify-content:flex-end}.fc-mini-end{min-height:30px!important;padding:4px 9px!important;border-radius:8px!important;border:1px solid rgba(190,65,50,.35)!important;background:rgba(190,65,50,.08)!important;color:#bd473c!important;font-size:10px!important;font-weight:900!important}.fc-mini-end:active{background:rgba(190,65,50,.16)!important}.fc-mini-end:disabled{opacity:.55}.fc-mini-player{gap:6px}.fc-mini-player .fc-mini-main button{min-height:32px}.fc-live-queue-row .playlist-open{flex:1;min-width:0}.fc-live-queue-row .playlist-open strong,.fc-live-queue-row .playlist-open small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.fc-live-queue-row .fc-play-song{flex:0 0 auto;min-width:62px}' +
       '.fc-sync-panel{border:1px solid var(--line);border-radius:16px;padding:13px;background:var(--card);display:flex;flex-direction:column;gap:9px}' +
       '.fc-drag-handle{width:32px;min-width:32px;height:36px;min-height:36px;padding:0;border:0!important;background:transparent!important;box-shadow:none!important;color:var(--mut);font-size:22px;font-weight:900;letter-spacing:-3px;cursor:grab;touch-action:none;user-select:none;-webkit-user-select:none}.fc-drag-handle:active,.fc-drag-handle.is-dragging{cursor:grabbing;color:var(--acc);background:color-mix(in srgb,var(--acc) 10%,transparent)!important}.fc-event-selected-row{transition:transform .12s ease,border-color .12s ease}.fc-event-selected-row.is-drop-target{border:2px dashed var(--acc);background:color-mix(in srgb,var(--acc) 8%,var(--card))}.fc-event-selected-row.is-drag-source{opacity:.45}.event-selected-row .fc-event-song-head{min-width:0}.event-selected-row .fc-event-song-head .event-selected-title{min-width:0}.event-selected-row .fc-event-song-head>button:not(.fc-drag-handle){min-width:36px}' +
       '.fc-panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}.fc-panel-head strong{font-size:17px}.fc-panel-icon{font-size:25px}' +

@@ -1,28 +1,13 @@
-FRECUENCIA CERO V26 — SEGUIMIENTO POR VOZ Y DIRECCIÓN EN VIVO
+FRECUENCIA CERO V27
 
-Objetivo
-V26 mejora la ejecución en vivo para que Voz 1 pueda avanzar la letra mediante reconocimiento de voz, cambiar canciones y administrar la cola sin regresar al catálogo.
+Novedad principal: botón “Terminar evento”.
 
-Cambios
-- Panel de seguimiento por voz exclusivo de Voz 1.
-- Reconocimiento es-MX mediante SpeechRecognition/webkitSpeechRecognition cuando el navegador lo ofrece.
-- Coincidencia por tokens y secuencia de palabras, con ventana limitada a las siguientes líneas para reducir saltos.
-- Validación por frase final o coincidencia estable; el sistema no reconoce melodía ni acompaña BPM automáticamente.
-- Controles manuales de línea anterior/siguiente como respaldo.
-- Micrófono inicia en el mismo gesto de usuario antes de esperar una confirmación Firebase, para evitar perder la activación de Safari/iOS.
-- Mini reproductor con canción actual, línea, progreso, siguiente canción, tono/bloque y controles de dirección.
-- Cola del evento editable en vivo: drag handle, agregar desde catálogo, eliminar canciones futuras.
-- El ordenamiento conserva la canción actual y modifica la cola sin detenerla.
-- Se añade/actualiza caché V26 y rutas de actualización del service worker.
+- Acción visible en el mini reproductor para propietario técnico y Voz 1 · Director.
+- Confirmación antes de cerrar la sesión en vivo.
+- Estado final compartido mediante Firebase.
+- Parada de seguimiento de voz, auto-scroll y temporizadores.
+- Cierre del mini reproductor y del aviso EN VIVO en dispositivos conectados.
+- Regreso a la lista del evento si el dispositivo estaba mostrando su canción.
+- El evento y su repertorio permanecen guardados.
 
-Permisos
-No se cambian reglas Firebase. Se mantienen las reglas V24 ya publicadas. Si una operación de cola se rechaza, el mensaje de estado indicará el fallo y la app revertirá el cambio local.
-
-Privacidad
-El audio no se escribe en Firebase ni se almacena por la aplicación. Algunos navegadores utilizan un servicio remoto para el reconocimiento, de modo que el audio puede enviarse al proveedor de reconocimiento del navegador. Se informa antes de solicitar el permiso.
-
-Compatibilidad
-SpeechRecognition no está disponible de manera uniforme. En Safari e iOS la implementación suele ser prefijada como webkitSpeechRecognition; la compatibilidad de la API no garantiza que todas las configuraciones de PWA, idioma o red funcionen en cada dispositivo. La prueba física es obligatoria. Si no funciona, el avance manual sincronizado permanece disponible.
-
-Actualización
-Reemplazar todos los archivos del ZIP en la raíz de GitHub Pages y hacer Commit changes. No borrar datos de Safari/PWA, no cambiar UID, band ID ni volver a crear la banda. Después abrir Más > Buscar actualizaciones en cada dispositivo.
+La interfaz de la aplicación no requiere cambios de base de datos. Para permitir que un dispositivo alterno vinculado al perfil propietario termine el evento, se adjunta un paquete de reglas Firebase V27.

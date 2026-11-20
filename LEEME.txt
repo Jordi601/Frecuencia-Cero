@@ -1,50 +1,26 @@
-FRECUENCIA CERO V26 — SEGUIMIENTO POR VOZ Y EVENTOS EN VIVO
+FRECUENCIA CERO V27 — TERMINAR EVENTO
 
-NOVEDADES
-- Seguimiento de letra por reconocimiento de voz en el dispositivo que dirige (Voz 1).
-- Reconocimiento en español de México (es-MX), con comparación de frases contra las líneas de la canción.
-- Botones de avance manual de línea como respaldo cuando el reconocimiento no esté disponible o escuche mal.
-- La voz inicia el micrófono desde el toque del usuario y después activa la posición compartida en Firebase; esto evita perder la activación de Safari/iOS por esperar una operación de red.
-- Mini reproductor rediseñado: canción actual, línea actual, canción siguiente, tono/instrumento y controles exclusivos de Voz 1 para anterior, pausar/reanudar y siguiente.
-- Lista en vivo: reordenar canciones con asa de tres líneas, agregar canciones del catálogo a la cola y quitar canciones futuras sin salir de la pantalla. La canción que está sonando no se puede quitar ni se interrumpe al reordenar.
-- Al cambiar la cola, se actualiza la vista de siguiente canción.
+Esta versión agrega una acción para terminar el evento que está en vivo.
+
+QUÉ HACE
+- Muestra el botón rojo “Terminar evento” en el mini reproductor, solo al propietario técnico o a Voz 1 · Director.
+- Pide confirmación antes de terminar.
+- Publica el estado “ended” en Firebase para que los demás dispositivos reciban el cierre.
+- Apaga el reconocimiento de voz, el desplazamiento automático y los temporizadores de acordes.
+- Oculta el mini reproductor y el aviso EN VIVO en todos los dispositivos conectados.
+- Si un dispositivo estaba mostrando la canción del evento, vuelve a la lista del repertorio.
+- Conserva el evento, las canciones y el orden. No elimina contenido.
 
 INSTALACIÓN
 1. Descomprime este ZIP.
-2. Sube todos los archivos a la raíz del repositorio GitHub Pages, reemplazando los anteriores.
-3. Haz Commit changes en main.
-4. En cada dispositivo autorizado entra a Más > Buscar actualizaciones.
-5. No borres los datos de Safari/PWA, no cambies el UID del propietario ni crees otra banda.
+2. Sube todos los archivos de la raíz del paquete al repositorio GitHub Pages, sustituyendo los anteriores.
+3. Pulsa Commit changes.
+4. En cada dispositivo abre Más > Buscar actualizaciones.
 
 FIREBASE
-- No requiere publicar reglas nuevas si tu proyecto conserva las reglas V24 que ya utilizabas para miembros, eventos y posición en vivo.
-- Se conserva la banda frecuencia-cero-main y el UID propietario qZCvhHTK3MUhcABIlZlRyrqHKdC2.
-- Solo Voz 1 puede dirigir la canción y cambiar la canción en vivo. Los demás perfiles reciben las posiciones compartidas según sus permisos.
-- Las operaciones de cola utilizan el guardado de eventos existente; el servidor sigue siendo la fuente de confirmación.
+Se adjunta por separado un paquete de reglas V27. Parte de las reglas V24 e incorpora permiso para que un dispositivo vinculado al perfil propietario también pueda terminar el estado en vivo. Guarda una copia de las reglas actuales antes de publicar las V27.
 
-CÓMO PROBAR EL SEGUIMIENTO POR VOZ
-1. Entra con Voz 1 en un dispositivo que tenga micrófono y conexión a Internet.
-2. Abre el evento y selecciona la canción desde la lista.
-3. En el lector, pulsa “Iniciar seguimiento por voz” y concede permiso al micrófono.
-4. Canta la letra con claridad, dejando que el sistema compare las frases reconocidas con las líneas de la canción.
-5. Comprueba desde otro dispositivo que la línea resaltada/visible avance.
-6. Si el reconocimiento falla, usa “Línea anterior” y “Siguiente línea”.
-7. Para cambiar de canción utiliza el mini reproductor; el botón Siguiente actualiza a todos.
+Si solo utiliza el botón el iPhone con el UID principal o Voz 1, las reglas V24 ya autorizan esa operación. Para usarlo desde una laptop vinculada al perfil propietario, publica las reglas V27.
 
-PRIVACIDAD Y COMPATIBILIDAD
-- La aplicación no guarda ni publica el audio del micrófono en Firebase.
-- El reconocimiento nativo del navegador puede enviar el audio a un servicio de reconocimiento externo; depende del navegador y de su configuración.
-- SpeechRecognition tiene disponibilidad desigual entre navegadores. Safari/iOS utiliza la variante prefijada webkit en las versiones compatibles, pero debe probarse en el iPhone real y en la PWA instalada.
-- Si el navegador no soporta reconocimiento, deniega el micrófono o pierde la red, el avance manual sigue disponible.
-- Al mandar la app a segundo plano, se detiene la escucha para no dejar el micrófono abierto. Al volver, el director puede reactivarla.
-- La app no ofrece aún reconocimiento musical de melodía, tempo ni compases. El avance por voz se basa en comparar palabras reconocidas con la letra.
-
-LISTA EN VIVO
-- En la lista del evento, deja el filtro “Todas” activo para reordenar la cola completa.
-- Arrastra desde el asa de tres líneas. En mouse, mantén pulsado el asa izquierda; en móvil, mantén pulsado y arrastra.
-- “Añadir” incorpora canciones del catálogo al final de la cola.
-- No se puede quitar la canción actual; avanza primero a otra canción.
-- Solo el propietario técnico o Voz 1 pueden administrar el repertorio en vivo.
-
-VALIDACIÓN
-Se debe probar después de publicar en GitHub: (a) micrófono en Safari iPhone, (b) PWA instalada iPhone, (c) laptop con Chrome/Edge, (d) sincronización de línea y canción siguiente, (e) reordenar y guardar cola en Firebase. El paquete no puede sustituir esa prueba con dispositivos físicos.
+NOTA
+Un dispositivo sin conexión no puede recibir el cierre en ese instante. Al reconectarse, recibirá el estado “ended”, cerrará el reproductor y dejará de seguir la canción. El evento guardado seguirá disponible para volver a iniciarlo.

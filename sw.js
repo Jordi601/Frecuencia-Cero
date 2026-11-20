@@ -1,8 +1,8 @@
-const CACHE_NAME = 'frecuencia-cero-shell-v26-voice-follow-live-queue';
+const CACHE_NAME = 'frecuencia-cero-shell-v27-end-event-global-stop';
 const APP_FILES = [
   './',
   './index.html',
-  './fc-sync.js?v=26',
+  './fc-sync.js?v=27',
   './manifest.webmanifest',
   './icon-192.png',
   './icon-512.png',

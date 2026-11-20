@@ -1,0 +1,7 @@
+V27 — Terminar evento
+- Nuevo botón “Terminar evento” en el mini reproductor.
+- Confirmación para evitar terminarlo por accidente.
+- Estado final compartido en Firebase.
+- Cierre del reproductor y parada del seguimiento por voz/desplazamiento en los demás dispositivos.
+- El repertorio se conserva; no borra canciones ni eventos.
+- Los dispositivos vinculados al propietario técnico pueden terminar el evento con las reglas V27.

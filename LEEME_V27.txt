@@ -1,0 +1,24 @@
+FRECUENCIA CERO V27 — TERMINAR EVENTO
+
+CAMBIO PRINCIPAL
+- Se agrega el botón rojo “Terminar evento” al reproductor en vivo.
+- Solo lo ven el propietario técnico y Voz 1 · Director.
+- Pide confirmación antes de terminar.
+- Publica un estado “ended” en bands/frecuencia-cero-main/live.
+- Los dispositivos conectados detienen el seguimiento por voz, desplazamiento y temporizadores; ocultan el mini reproductor y vuelven al repertorio si estaban leyendo la canción del evento.
+- El evento, las canciones y el orden permanecen guardados. No se borra el repertorio.
+
+INSTALACIÓN
+1. Descomprime el ZIP.
+2. Sube todos los archivos del paquete a la raíz del repositorio GitHub Pages y sustituye los anteriores.
+3. Publica los cambios (Commit changes).
+4. En cada dispositivo abre Más > Buscar actualizaciones.
+
+FIREBASE
+- Se incluye un paquete separado con las reglas V27.
+- Las reglas V27 agregan permiso de escritura del nodo live a dispositivos vinculados al perfil propietario Acordeonista, sin ampliar el permiso al resto de integrantes.
+- Antes de publicar, guarda una copia de tus reglas actuales.
+- Si solo termina el evento el iPhone con el UID principal o Voz 1, las reglas V24 ya permiten esa operación; las reglas V27 también habilitan el dispositivo alterno del propietario.
+
+NOTA
+La terminación detiene la sesión compartida en los dispositivos que estén conectados. Un dispositivo sin conexión la recibirá al reconectarse y consultar el estado “ended”. El evento guardado permanece disponible para volver a iniciarlo.
