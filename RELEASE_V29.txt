@@ -1,0 +1,4 @@
+Frecuencia Cero V29
+Compacted live player, centered three-item dock, and iPhone full-height reader.
+Default appearance: dark. Light theme remains available.
+No Firebase rules changes required.

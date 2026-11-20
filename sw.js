@@ -1,8 +1,8 @@
-const CACHE_NAME = 'frecuencia-cero-shell-v28-mobile-bottom-navigation-dark';
+const CACHE_NAME = 'frecuencia-cero-shell-v29-compact-live-dock-fullscreen';
 const APP_FILES = [
   './',
   './index.html',
-  './fc-sync.js?v=28',
+  './fc-sync.js?v=29',
   './manifest.webmanifest',
   './icon-192.png',
   './icon-512.png',

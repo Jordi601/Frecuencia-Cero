@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#0d1117">
-<meta name="fc-build" content="v28-mobile-first-bottom-navigation-dark">
+<meta name="fc-build" content="v29-compact-live-dock-fullscreen">
 <title>Frecuencia Cero – Letras y acordes</title>
 <script>(function(){try{var t=localStorage.getItem("fc_theme_preference");document.documentElement.setAttribute("data-theme",t==="light"?"light":"dark");var m=document.querySelector("meta[name=theme-color]");if(m)m.content=t==="light"?"#f3f5f7":"#0d1117";}catch(e){document.documentElement.setAttribute("data-theme","dark");}})();</script>
 <meta name="application-name" content="Frecuencia Cero">
@@ -281,7 +281,7 @@ body{
 
 
 
-/* V28: diseño móvil compacto, navegación inferior y tema oscuro inicial. */
+/* V29: diseño móvil compacto, navegación inferior y tema oscuro inicial. */
 :root[data-theme="dark"]{color-scheme:dark}
 :root[data-theme="light"]{color-scheme:light}
 html,body{background:var(--bg);overscroll-behavior:none}
@@ -391,6 +391,101 @@ body.fc-reader-open .fc-mini-end-row{margin-top:-1px}
 body.fc-reader-open .fc-mini-end{min-height:25px!important;padding:2px 8px!important}
 @media(min-width:700px){body.fc-reader-open #rd{padding-bottom:calc(158px + env(safe-area-inset-bottom,0px))!important}}
 
+
+/* V29: dock centrado de tres accesos y lector móvil sin elementos flotantes sobre la letra. */
+html,body{width:100%;max-width:100%;height:100%;min-height:0;overflow:hidden;overscroll-behavior:none;background:var(--bg)}
+body{position:fixed!important;inset:0!important;width:100%!important;height:100vh!important;height:100dvh!important;min-height:0!important;max-height:100dvh!important;padding:0!important;margin:0!important;overflow:hidden!important;background:var(--bg)!important}
+.view{width:100%!important;height:100vh!important;height:100dvh!important;min-height:0!important;max-height:100dvh!important;overflow:hidden!important;padding-top:env(safe-area-inset-top,0px)!important;padding-bottom:0!important;background:var(--bg)!important;box-sizing:border-box!important}
+.view.primary-screen{padding-bottom:calc(82px + env(safe-area-inset-bottom,0px))!important}
+#vr{padding-bottom:0!important;min-height:0!important;display:none;flex-direction:column}
+#vr.on{display:flex!important}
+/* Dock tipo macOS: tres destinos principales, simétricos y accesibles con el pulgar. */
+.app-bottom-nav{position:fixed!important;z-index:1200!important;left:50%!important;right:auto!important;bottom:calc(7px + env(safe-area-inset-bottom,0px))!important;transform:translateX(-50%)!important;width:min(calc(100% - 30px),440px)!important;margin:0!important;padding:6px!important;display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:5px!important;border:1px solid color-mix(in srgb,var(--line) 90%,transparent)!important;border-radius:22px!important;background:color-mix(in srgb,var(--card) 91%,transparent)!important;box-shadow:0 9px 30px rgba(0,0,0,.32),inset 0 1px 0 rgba(255,255,255,.045)!important;backdrop-filter:blur(22px) saturate(1.35)!important;-webkit-backdrop-filter:blur(22px) saturate(1.35)!important}
+.app-bottom-nav[hidden]{display:none!important}
+.app-bottom-nav button{display:flex!important;flex-direction:column!important;justify-content:center!important;align-items:center!important;gap:3px!important;min-width:0!important;min-height:52px!important;padding:4px 2px!important;border:1px solid transparent!important;border-radius:16px!important;background:transparent!important;color:var(--mut)!important;font-size:10px!important;line-height:1.05!important;font-weight:850!important;white-space:nowrap!important;box-shadow:none!important}
+.app-bottom-nav button::before{display:block!important;font-size:21px!important;line-height:1!important;font-weight:500!important}
+.app-bottom-nav #tall::before{content:'♫'!important;font-size:24px!important}
+.app-bottom-nav #tset::before{content:'▤'!important;font-size:20px!important}
+.app-bottom-nav #bmenu::before{content:'•••'!important;font-size:19px!important;letter-spacing:2px!important}
+.app-bottom-nav button.on{background:color-mix(in srgb,var(--acc) 15%,var(--card))!important;border-color:color-mix(in srgb,var(--acc) 31%,var(--line))!important;color:var(--acc)!important;box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 2px 8px rgba(0,0,0,.16)!important}
+#tmode[hidden]{display:none!important}
+#list{padding-bottom:12px!important}
+#vse .event-list{padding-bottom:14px!important}
+#vm .menu-content{padding-bottom:14px!important}
+@media(max-width:699px){
+  /* iOS: la vista usa la altura completa; la zona segura la pinta el propio toolbar. */
+  .view{padding-bottom:0!important}
+  .view.primary-screen{padding-bottom:calc(82px + env(safe-area-inset-bottom,0px))!important}
+  #vr{padding-bottom:0!important;gap:0!important}
+  #vr>header{flex:0 0 auto!important;padding:6px 10px!important;min-height:43px}
+  #fcRoleBar{flex:0 0 auto!important;margin:0 8px 4px!important;padding:4px 7px!important}
+  #fcVoiceFollowPanel,#fcNextOnlyPanel{flex:0 0 auto!important;margin:3px 8px 5px!important;padding:7px 9px!important;gap:5px!important}
+  #rd{flex:1 1 0!important;min-height:0!important;padding:8px 14px 12px!important;overflow-y:auto!important;overscroll-behavior:contain!important;-webkit-overflow-scrolling:touch}
+  body.fc-reader-open.fc-live-reader #rd{padding-bottom:12px!important}
+  #rt{padding-bottom:10px!important}
+  #mainbar{flex:0 0 auto!important;min-height:48px!important;display:flex!important;align-items:center!important;justify-content:space-between!important;gap:5px!important;flex-wrap:nowrap!important;padding:5px 8px calc(6px + env(safe-area-inset-bottom,0px))!important;background:var(--card)!important;border-top:1px solid var(--line)!important}
+  .reader-font-controls{display:flex;align-items:center;gap:4px;flex:0 0 auto}
+  #mainbar #fm,#mainbar #fp{min-width:36px;width:36px;min-height:36px;padding:4px 3px;border-radius:10px;font-size:12px}
+  #mainbar #play{flex:1 1 auto;min-width:64px;min-height:36px;padding:5px 8px;border-radius:10px;font-size:11px;white-space:nowrap}
+  #mainbar #readerModeToggle{flex:0 0 40px;width:40px;min-width:40px;min-height:36px;padding:4px;border-radius:10px;font-size:17px}
+  #mainbar .reader-tools-disclosure{flex:0 0 auto}
+  #mainbar .reader-tools-disclosure>summary{min-height:36px;padding:4px 8px;font-size:10px;border-radius:10px}
+  #mainbar #singerTools{max-width:min(94vw,360px)}
+  #bassTools{flex:0 0 auto!important;min-height:43px!important;padding:3px 8px calc(5px + env(safe-area-inset-bottom,0px))!important;background:var(--card)!important}
+  @supports selector(#vr:has(#bassTools.on)){#vr:has(#bassTools.on) #mainbar{padding-bottom:6px!important}}
+  #bassTools .bass-tools-disclosure>summary{min-height:34px}
+  /* Reproductor integrado en el flujo: ocupa poco y nunca tapa versos. */
+  body.fc-reader-open #fcMiniPlayer{position:relative!important;left:auto!important;right:auto!important;top:auto!important;bottom:auto!important;inset:auto!important;z-index:5!important;display:flex!important;flex:0 0 auto!important;width:auto!important;max-width:none!important;margin:0 8px 5px!important;padding:6px 8px 5px!important;gap:4px!important;border-radius:13px!important;box-shadow:0 3px 12px rgba(0,0,0,.18)!important;backdrop-filter:blur(12px)!important;-webkit-backdrop-filter:blur(12px)!important}
+  body.fc-reader-open .fc-mini-top{font-size:8px!important;line-height:1.1!important;min-height:11px!important;gap:5px!important}
+  body.fc-reader-open .fc-mini-main{gap:6px!important;min-height:24px!important}
+  body.fc-reader-open .fc-mini-copy{gap:1px!important}
+  body.fc-reader-open .fc-mini-copy strong{font-size:11px!important;line-height:1.15!important}
+  body.fc-reader-open .fc-mini-copy span{font-size:9px!important;line-height:1.1!important;max-width:54vw!important}
+  body.fc-reader-open .fc-mini-main button{min-height:27px!important;padding:3px 7px!important;font-size:9px!important}
+  body.fc-reader-open .fc-mini-next{display:flex!important;min-height:22px!important;padding:3px 6px!important;gap:5px!important}
+  body.fc-reader-open .fc-mini-next>span{font-size:7px!important}
+  body.fc-reader-open .fc-mini-next strong{font-size:9px!important}
+  body.fc-reader-open .fc-mini-next small{display:none!important}
+  body.fc-reader-open .fc-mini-bottom{display:flex!important;align-items:center!important;gap:5px!important;min-width:0!important}
+  body.fc-reader-open .fc-mini-controls{flex:1 1 auto!important;gap:4px!important;justify-content:space-between!important}
+  body.fc-reader-open .fc-mini-controls button{flex:1 1 0!important;min-width:0!important;min-height:27px!important;padding:3px 4px!important;font-size:9px!important;border-radius:8px!important}
+  body.fc-reader-open .fc-mini-more{position:relative!important;flex:0 0 30px!important}
+  body.fc-reader-open .fc-mini-more>summary{list-style:none;display:grid;place-items:center;min-height:27px;padding:3px 5px;border:1px solid var(--line);border-radius:8px;background:var(--bg);font-size:9px;font-weight:900;cursor:pointer}
+  body.fc-reader-open .fc-mini-more>summary::-webkit-details-marker{display:none}
+  body.fc-reader-open .fc-mini-more[open]>button{position:absolute;right:0;bottom:calc(100% + 6px);z-index:20;min-height:34px;padding:5px 8px;white-space:nowrap;background:var(--card);box-shadow:0 7px 20px rgba(0,0,0,.25)}
+  body.fc-reader-open .fc-mini-end-row{display:none!important}
+  body.fc-reader-open .fc-mini-progress-track{height:2px!important}
+  body.fc-reader-open .fc-mini-progress-text{display:none!important}
+  #list{padding-bottom:12px!important}
+  #vse .event-list{padding-bottom:14px!important}
+  #vm .menu-content{padding-bottom:14px!important}
+}
+@media(min-width:700px){.app-bottom-nav{width:min(440px,calc(100% - 40px))!important;bottom:14px!important}.view.primary-screen{padding-bottom:82px!important}}
+@media(max-width:390px){.app-bottom-nav{width:calc(100% - 22px)!important;gap:3px!important;padding:5px!important}.app-bottom-nav button{min-height:48px!important;font-size:9px!important}.app-bottom-nav button::before{font-size:19px!important}#mainbar{gap:4px!important;padding-left:6px!important;padding-right:6px!important}#mainbar #fm,#mainbar #fp{width:33px;min-width:33px}#mainbar #readerModeToggle{flex-basis:36px;width:36px;min-width:36px}#mainbar .reader-tools-disclosure>summary{padding-left:6px;padding-right:6px}body.fc-reader-open #fcMiniPlayer{margin-left:6px!important;margin-right:6px!important}}
+@media(prefers-reduced-motion:reduce){.app-bottom-nav,button{transition:none!important}}
+
+/* V29.1: asegurar que el lector ocupe el viewport completo en iOS standalone. */
+@media(max-width:699px){
+  #vr.view.on{position:fixed!important;inset:0!important;width:100vw!important;height:auto!important;min-height:0!important;max-height:none!important;box-sizing:border-box!important;padding-top:env(safe-area-inset-top,0px)!important;padding-bottom:0!important;overflow:hidden!important}
+  #vr.view.on>#rd{flex:1 1 0!important;min-height:0!important}
+  #vr.view.on>#mainbar,#vr.view.on>#bassTools{flex:0 0 auto!important;width:100%!important;margin:0!important}
+  #vr.view.on>#mainbar{padding-bottom:calc(7px + env(safe-area-inset-bottom,0px))!important}
+  #vr.view.on>#bassTools{padding-bottom:calc(6px + env(safe-area-inset-bottom,0px))!important}
+  body.fc-reader-open #fcMiniPlayer{padding:5px 7px 4px!important;gap:3px!important;margin:0 7px 4px!important}
+  body.fc-reader-open #fcMiniReturn{display:none!important}
+  body.fc-reader-open .fc-mini-top{min-height:9px!important;font-size:7px!important;line-height:1!important}
+  body.fc-reader-open .fc-mini-main{min-height:18px!important;gap:0!important}
+  body.fc-reader-open .fc-mini-copy strong{font-size:10px!important;line-height:1.1!important}
+  body.fc-reader-open .fc-mini-copy span{display:none!important}
+  body.fc-reader-open .fc-mini-next{min-height:19px!important;padding:2px 5px!important}
+  body.fc-reader-open .fc-mini-next strong{font-size:8px!important}
+  body.fc-reader-open .fc-mini-controls button{min-height:24px!important;padding:2px 4px!important;font-size:8px!important}
+  body.fc-reader-open .fc-mini-more>summary{min-height:24px!important;padding:2px 5px!important}
+  body.fc-reader-open .fc-mini-progress-track{height:2px!important}
+  /* El color del shell se extiende por detrás del indicador de inicio de iOS. */
+  #vr.view.on::after{content:"";display:block;position:absolute;z-index:0;left:0;right:0;bottom:0;height:env(safe-area-inset-bottom,0px);background:var(--card);pointer-events:none}
+  #vr.view.on>#mainbar,#vr.view.on>#bassTools{position:relative;z-index:1}
+}
 </style>
 
 <link rel="manifest" href="./manifest.webmanifest">
@@ -446,7 +541,7 @@ body.fc-reader-open .fc-mini-end{min-height:25px!important;padding:2px 8px!impor
  <header><button id="bback">‹ Lista</button><div class="grow" style="flex:1"></div><button id="bedit">Editar</button></header>
  <div id="rd"><h1 id="rh"></h1><div id="rmeta"></div><div id="bassKeyBanner" class="bass-key-banner" aria-live="polite"></div><div id="rt"></div></div>
  <div class="bar reader-toolbar" id="mainbar">
-  <button id="fm" aria-label="Letra más chica">A−</button><button id="fp" aria-label="Letra más grande">A+</button><button id="play" class="p">▶ Auto</button>
+  <div class="reader-font-controls"><button id="fm" aria-label="Letra más chica">A−</button><button id="fp" aria-label="Letra más grande">A+</button></div><button id="play" class="p">▶ Auto</button><button id="readerModeToggle" class="reader-mode-toggle" type="button" aria-label="Cambiar a vista bajista" title="Cambiar vista">🎤</button>
   <details class="reader-tools-disclosure"><summary>⚙ Ajustes</summary>
    <div id="singerTools" class="singer-tools"><button id="sm" aria-label="Más lento">−</button><input id="speedrange" class="speed-range" type="range" min="5" max="100" step="5" value="30" aria-label="Velocidad del desplazamiento"><button id="sp2" aria-label="Más rápido">+</button><span id="speedval">30 px/s</span></div>
   </details>
@@ -507,16 +602,16 @@ body.fc-reader-open .fc-mini-end{min-height:25px!important;padding:2px 8px!impor
   </div>
   <p id="mmsg" class="note" aria-live="polite"></p>
   <div class="fc-app-meta">
-   <span id="fcAppVersion">Frecuencia Cero · V28</span>
+   <span id="fcAppVersion">Frecuencia Cero · V29</span>
    <button id="fcCheckUpdates" type="button">↻ Buscar actualizaciones</button>
   </div>
   <p id="fcUpdateStatus" class="fc-update-status" aria-live="polite">La versión instalada se conserva al actualizar.</p>
  </div>
 </section>
+<button id="tmode" class="mode-toggle" type="button" data-mode="s" aria-label="Cambiar a vista bajista" aria-pressed="false" hidden tabindex="-1">Cantante</button>
 <nav class="tabs app-bottom-nav" id="appNav" aria-label="Navegación principal">
-  <button id="tall" class="on" type="button" aria-pressed="true">Todas</button>
+  <button id="tall" class="on" type="button" aria-pressed="true">Catálogo</button>
   <button id="tset" type="button">Eventos</button>
-  <button id="tmode" class="mode-toggle" type="button" data-mode="s" aria-label="Cambiar a vista bajista" aria-pressed="false">Cantante</button>
   <button id="bmenu" type="button" aria-label="Más opciones">Más</button>
  </nav>
 <script>
@@ -700,7 +795,7 @@ function paint(){
  $('rmeta').textContent=(mode==='s'?'Vista cantante · Solo letra':'Vista bajista · Letra atenuada + acordes')+(cur.chordDraft?' · Acordes sugeridos: revisar':'')+(cur.mappingNote?' · '+cur.mappingNote:'')+(cur.loopChords?' · Secuencia cíclica hasta detener':'')+' · Duración aprox. '+formatDuration(songDuration(cur));
  updateModeControls();setActiveBassEvent(Math.min(bassIndex,Math.max(0,bassEvents.length-1)),false);
 }
-function syncModeButton(){var b=$('tmode');if(!b)return;b.textContent=mode==='s'?'Cantante':'Bajista';b.setAttribute('data-mode',mode);b.setAttribute('aria-label',mode==='s'?'Cambiar a vista bajista':'Cambiar a vista cantante');b.setAttribute('aria-pressed',mode==='b'?'true':'false')}
+function syncModeButton(){var b=$('tmode');if(b){b.textContent=mode==='s'?'Cantante':'Bajista';b.setAttribute('data-mode',mode);b.setAttribute('aria-label',mode==='s'?'Cambiar a vista bajista':'Cambiar a vista cantante');b.setAttribute('aria-pressed',mode==='b'?'true':'false')}var rb=$('readerModeToggle');if(rb){rb.textContent=mode==='s'?'🎤':'🎸';rb.setAttribute('aria-label',mode==='s'?'Cambiar a vista bajista':'Cambiar a vista cantante');rb.title=mode==='s'?'Vista cantante · Cambiar a bajista':'Vista bajista · Cambiar a cantante';rb.setAttribute('aria-pressed',mode==='b'?'true':'false')}}
 function updateModeControls(){var isBass=mode==='b';$('bassTools').classList.toggle('on',isBass);$('singerTools').classList.toggle('off',isBass);$('play').textContent=isBass?(chordTimer?'❚❚ Pausar':'▶ Auto acordes'):(scrollFrame?'❚❚ Pausar':'▶ Scroll');$('play').title=isBass?'Avanza un acorde cada intervalo configurado':'Desplazamiento automático continuo';$('chordtime').textContent=(cur&&cur.chordSeconds?Number(cur.chordSeconds).toFixed(1):'3.0')+' s';$('speedrange').value=String(speed);$('speedval').textContent=speed+' px/s';$('trl').textContent=(cur&&cur.tr>0?'+':'')+(cur&&cur.tr||0)}
 function setActiveBassEvent(index,scroll){if(!bassEvents.length)return;bassIndex=Math.max(0,Math.min(index,bassEvents.length-1));var activeLine=bassEvents[bassIndex].line;bassEvents.forEach(function(ev,i){ev.el.classList.toggle('active',i===bassIndex)});Array.prototype.forEach.call($('rt').querySelectorAll('.bass-line'),function(line){line.classList.toggle('line-current',line===activeLine)});if(scroll){var target=bassEvents[bassIndex].el,rd=$('rd'),r=target.getBoundingClientRect(),container=rd.getBoundingClientRect(),top=rd.scrollTop+(r.top-container.top)-Math.max(35,rd.clientHeight*.38);rd.scrollTo({top:Math.max(0,top),behavior:'smooth'})}if(window.fcSyncPositionChanged&&bassEvents[bassIndex])window.fcSyncPositionChanged(Number(activeLine.dataset.lineIndex||0),bassIndex)}
 function stopAuto(){if(chordTimer){clearInterval(chordTimer);chordTimer=null}updateModeControls()}
@@ -846,7 +941,7 @@ function importText(raw){
 }
 function importBackupOrText(raw){try{var data=JSON.parse(raw);if(data&&data.format==='letras-repertorio-v2'&&Array.isArray(data.songs)){songs=data.songs.filter(function(s){return s&&s.title}).map(function(s,i){if(!s.id)s.id='restored_'+i;if(s.text==null)s.text='';if(s.section!=='keyboard'&&s.section!=='accordion')s.section='accordion';if(s.durationSec==null)s.durationSec=estimateDurationSeconds(s.text);if(s.chordSeconds==null)s.chordSeconds=3.0;if(s.scrollSpeed==null)s.scrollSpeed=defaultSpeed;return s});if(Array.isArray(data.events))events=data.events;seedCatalog();seedLegacyEvent();saveEvents();save();render();renderEvents();return {count:songs.length,backup:true}}}catch(e){}return {count:importText(raw),backup:false}}
 $('q').oninput=render;$('tall').onclick=function(){filt='all';$('tall').setAttribute('aria-pressed','true');show('vl');render()};$('tset').onclick=function(){renderEvents();show('vse')};
-$('tmode').onclick=function(){mode=mode==='s'?'b':'s';safeStore('letras_mode',mode);syncModeButton();if($('vr').classList.contains('on')){stopAll();bassIndex=0;paint();$('rd').scrollTop=0}};
+$('tmode').onclick=function(){mode=mode==='s'?'b':'s';safeStore('letras_mode',mode);syncModeButton();if($('vr').classList.contains('on')){stopAll();bassIndex=0;paint();$('rd').scrollTop=0}};if($('readerModeToggle'))$('readerModeToggle').onclick=function(){$('tmode').click()};
 $('bnew').onclick=function(){edit(null)};$('bedit').onclick=function(){edit(cur&&cur.id)};$('bback').onclick=function(){stopAll();show(songReturnView==='vplaylist'?'vplaylist':'vl');if(songReturnView==='vplaylist')renderEventPlaylist()};$('ecancel').onclick=function(){show(editId?'vr':'vl')};
 $('esave').onclick=function(){
  var title=$('et').value.trim(),text=$('el').value.replace(/\s+$/,'');
@@ -903,12 +998,12 @@ syncModeButton();setNotation();render();
 <!-- Generación y lectura de QR para vincular otro dispositivo al mismo perfil -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
-<script src="./fc-sync.js?v=28"></script>
+<script src="./fc-sync.js?v=29"></script>
 
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function () {
-    navigator.serviceWorker.register('./sw.js?v=28').catch(function (err) {
+    navigator.serviceWorker.register('./sw.js?v=29').catch(function (err) {
       console.warn('No se pudo registrar el modo sin conexión:', err);
     });
   });

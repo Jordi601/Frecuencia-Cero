@@ -1,0 +1,35 @@
+FRECUENCIA CERO V29 – COMPACTA PARA IPHONE Y DOCK INFERIOR
+
+CONTENIDO
+- index.html: interfaz y estilos actualizados.
+- fc-sync.js: lógica de sincronización y reproductor.
+- sw.js: caché V29.
+- manifest.webmanifest e iconos de la aplicación.
+
+CAMBIOS VISUALES
+1. Navegación principal de tres accesos (Catálogo, Eventos y Más) en un dock centrado tipo macOS.
+2. En el lector de canciones, el mini reproductor se integra al flujo y deja de flotar encima de los versos.
+3. El mini reproductor muestra canción actual y siguiente, controles compactos y opciones adicionales.
+4. En móvil se oculta el botón "Ver letra" dentro del propio lector, porque el usuario ya está viendo la letra.
+5. Se redujo la altura del reproductor en iPhone y se conserva el acceso a lista, pausa, anterior/siguiente y terminar evento.
+6. El modo Cantante/Bajista continúa disponible en el lector mediante un control pequeño.
+7. El lector iOS se fija al viewport completo y pinta la zona segura inferior con el fondo de la barra de controles, evitando el bloque negro vacío.
+8. Se retiró en el lector móvil el margen artificial inferior que desperdiciaba espacio.
+9. Tema oscuro inicial; el tema claro sigue disponible.
+
+INSTALACIÓN
+1. Descomprime el ZIP.
+2. En GitHub abre el repositorio Frecuencia-Cero.
+3. Selecciona Add file > Upload files.
+4. Sube todos los archivos de esta carpeta a la raíz del repositorio y sustituye los anteriores.
+5. Haz Commit changes.
+6. En iPhone y laptop abre Más > Buscar actualizaciones.
+
+FIREBASE
+- No requiere modificar reglas ni crear otra banda.
+- Conserva los datos, los perfiles y el UID actual.
+
+NOTAS DE PRUEBA
+- JavaScript externo e inline validado sintácticamente con Node.js.
+- El ZIP se verificó después de crearse.
+- La distribución debe confirmarse en el iPhone físico: las áreas seguras pueden variar entre versiones de iOS y dispositivos.
