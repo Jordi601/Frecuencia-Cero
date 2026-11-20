@@ -4,7 +4,7 @@
 (function () {
   'use strict';
 
-  var APP_VERSION = 'V27';
+  var APP_VERSION = 'V28';
   var CFG_KEY = 'fc_firebase_config_v1';
   var BAND_KEY = 'fc_band_id_v1';
   var PROFILE_KEY = 'fc_device_profile_v1';
@@ -1595,8 +1595,9 @@
     if (!mini) return;
     var song = liveState && liveState.songId ? window.find(liveState.songId) : null;
     var ev = liveState && liveState.eventId ? (window.events || []).find(function (x) { return x.id === liveState.eventId; }) : null;
-    if (!isConnected() || !isLiveSessionActive() || !song || !ev) { mini.style.display = 'none'; return; }
+    if (!isConnected() || !isLiveSessionActive() || !song || !ev) { mini.style.display = 'none'; document.body.classList.remove('fc-live-reader'); return; }
     mini.style.display = 'flex';
+    document.body.classList.toggle('fc-live-reader', !!($('vr') && $('vr').classList.contains('on')));
     setText('fcMiniEvent', ev.name || 'Evento en vivo');
     setText('fcMiniSong', song.title || 'Canción actual');
     setText('fcMiniLine', cleanLiveLine(song, liveState.rowIndex));
@@ -2650,7 +2651,7 @@
         return;
       }
       var registration = await navigator.serviceWorker.getRegistration('./');
-      if (!registration) registration = await navigator.serviceWorker.register('./sw.js?v=27');
+      if (!registration) registration = await navigator.serviceWorker.register('./sw.js?v=28');
       var controllerChanged = new Promise(function (resolve) {
         var finished = false;
         var finish = function () {

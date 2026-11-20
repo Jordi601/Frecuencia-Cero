@@ -1,0 +1,19 @@
+FRECUENCIA CERO V28
+
+INSTALACIÓN
+1. Descomprime el ZIP.
+2. En GitHub abre el repositorio Frecuencia-Cero.
+3. Usa Add file > Upload files.
+4. Sube todos los archivos de este paquete a la raíz, sustituyendo los anteriores.
+5. Pulsa Commit changes.
+6. En iPhone y laptop abre Frecuencia Cero y entra a Más > Buscar actualizaciones.
+
+No se requieren reglas nuevas de Firebase. No borres los datos de Safari ni elimines la app instalada de la pantalla de inicio.
+
+CAMBIOS VISUALES
+- La navegación principal queda abajo en Catálogo, Eventos y Más.
+- El tema inicial es oscuro. El cambio a claro se conserva en el dispositivo.
+- Las vistas secundarias (lector, edición de canciones y eventos) ocultan la navegación principal para aprovechar el espacio; sus botones de regreso se mantienen.
+- Los controles avanzados del lector se despliegan desde Ajustes y Ajustes de acordes. Siguen disponibles todas las funciones.
+- La letra utiliza el espacio restante y ya no reserva el margen inferior artificial de 45vh.
+- El fondo llega hasta el borde inferior del iPhone y los controles respetan el área del indicador de inicio.

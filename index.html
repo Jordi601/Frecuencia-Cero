@@ -1,12 +1,13 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="theme-color" content="#f3f5f7">
-<meta name="fc-build" content="v27-end-event-global-stop">
+<meta name="theme-color" content="#0d1117">
+<meta name="fc-build" content="v28-mobile-first-bottom-navigation-dark">
 <title>Frecuencia Cero – Letras y acordes</title>
+<script>(function(){try{var t=localStorage.getItem("fc_theme_preference");document.documentElement.setAttribute("data-theme",t==="light"?"light":"dark");var m=document.querySelector("meta[name=theme-color]");if(m)m.content=t==="light"?"#f3f5f7":"#0d1117";}catch(e){document.documentElement.setAttribute("data-theme","dark");}})();</script>
 <meta name="application-name" content="Frecuencia Cero">
 <meta name="apple-mobile-web-app-title" content="Frecuencia Cero">
 <meta name="mobile-web-app-capable" content="yes">
@@ -278,6 +279,118 @@ body{
  .view{height:100%;}
 }
 
+
+
+/* V28: diseño móvil compacto, navegación inferior y tema oscuro inicial. */
+:root[data-theme="dark"]{color-scheme:dark}
+:root[data-theme="light"]{color-scheme:light}
+html,body{background:var(--bg);overscroll-behavior:none}
+body{padding:0!important;min-height:0!important;height:100dvh!important;max-height:100dvh!important}
+.view{height:100dvh!important;min-height:0!important;overflow:hidden;padding-top:env(safe-area-inset-top,0px)!important;padding-bottom:env(safe-area-inset-bottom,0px)!important}
+.view.primary-screen{padding-bottom:calc(75px + env(safe-area-inset-bottom,0px))!important}
+#vl,#vse,#vm{min-height:0}
+#vl>header{flex:0 0 auto;padding:9px 12px 8px;gap:8px}
+#q{min-height:42px;font-size:16px}
+#bnew{min-width:43px;min-height:42px;font-size:23px;padding:4px 11px}
+#list{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:0 11px 16px!important}
+.catalog-section-heading{margin:9px 0 2px;padding:8px 10px;border-radius:11px;font-size:12px}
+.list-group{padding:8px 5px 4px 11px}
+.row .t{min-height:43px;padding:8px 4px;font-size:15px}
+.row .s{min-height:38px;padding:5px 9px;font-size:22px}
+.app-bottom-nav{position:fixed;z-index:1200;left:0;right:0;bottom:0;width:100%;margin:0;padding:5px 8px calc(5px + env(safe-area-inset-bottom,0px));display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;border:0;border-top:1px solid var(--line);border-radius:16px 16px 0 0;background:color-mix(in srgb,var(--card) 96%,transparent);box-shadow:0 -5px 22px rgba(0,0,0,.13);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px)}
+.app-bottom-nav[hidden]{display:none!important}
+.app-bottom-nav button{display:flex;flex-direction:column;justify-content:center;align-items:center;gap:3px;min-width:0;min-height:55px;padding:4px 2px;border:1px solid transparent;border-radius:12px;background:transparent;color:var(--mut);font-size:10px;line-height:1.05;font-weight:800;white-space:nowrap;box-shadow:none}
+.app-bottom-nav button::before{font-size:20px;line-height:1.05}
+.app-bottom-nav button.on{background:color-mix(in srgb,var(--acc) 12%,var(--card));border-color:color-mix(in srgb,var(--acc) 25%,var(--line));color:var(--acc)}
+.app-bottom-nav #tmode{background:transparent;color:var(--mut);border-color:transparent}
+.app-bottom-nav #tmode::before{content:'🎤';font-size:19px}
+.app-bottom-nav #tmode[data-mode="b"]::before{content:'🎸'}
+.app-bottom-nav #tall::before{content:'♫'}
+.app-bottom-nav #tset::before{content:'▤'}
+.app-bottom-nav #bmenu::before{content:'⋯';font-size:25px}
+#vse>header{flex:0 0 auto;padding:9px 12px}
+.event-intro{flex:0 0 auto;padding:2px 13px 8px}
+.event-list{flex:1 1 auto;min-height:0;padding:2px 11px 14px!important;overscroll-behavior:contain}
+.event-import{flex:0 0 auto;margin:5px 11px 8px;padding:10px 11px;border-radius:14px}
+.event-import-head{margin-bottom:7px}
+.event-import textarea{min-height:45px}
+#vm .menu-content{height:100%;min-height:0;padding:10px 12px 16px;overflow-y:auto;overscroll-behavior:contain}
+#vm .fc-sync-panel{padding:4px 0 8px;gap:9px}
+#vm .fc-access-card{padding:12px;border-radius:14px;gap:8px}
+#vm .menu-utility-actions{gap:7px}
+#vm .menu-utility-actions button{min-height:43px}
+#vm .fc-app-meta{padding-bottom:2px}
+#vset>header,#vplaylist>header,#vr>header{flex:0 0 auto;padding:8px 11px}
+#vset .event-editor{padding:9px 11px 12px;gap:8px}
+#vset .event-selected{max-height:25dvh}
+#vset .event-picker{max-height:34dvh}
+#vplaylist .playlist-toolbar{padding:7px 10px;gap:5px}
+#vplaylist .event-list{padding-bottom:100px!important}
+#vr{min-height:0}
+#rd{flex:1 1 auto;min-height:0;width:100%;padding:8px 14px 20px!important;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;scrollbar-gutter:stable}
+#rh{font-size:clamp(16px,4vw,21px);line-height:1.2;margin-bottom:3px}
+#rmeta{font-size:11px;margin-bottom:8px;line-height:1.35}
+#rt{font-size:clamp(20px,5.2vw,30px);line-height:1.42;max-width:100%;padding-bottom:8px}
+.lyric-line,.bass-line,.bass-plain-line{margin-bottom:.28em;line-height:1.42}
+.chord-tag{font-size:.62em;min-height:1.05em}
+.reader-toolbar,.bar#mainbar,.bar#bassTools{flex:0 0 auto;min-height:49px;padding:6px 9px;gap:6px;flex-wrap:nowrap;justify-content:flex-start;background:var(--card);border-top:1px solid var(--line)}
+#mainbar button{min-height:38px;padding:5px 11px;border-radius:10px;font-size:12px}
+#play{min-width:90px}
+.reader-tools-disclosure{position:relative;flex:0 0 auto;min-width:0}
+.reader-tools-disclosure>summary{list-style:none;display:flex;align-items:center;justify-content:center;min-height:38px;padding:5px 10px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg);font-size:11px;font-weight:850;cursor:pointer;white-space:nowrap}
+.reader-tools-disclosure>summary::-webkit-details-marker{display:none}
+.reader-tools-disclosure[open]>summary{border-color:var(--acc);color:var(--acc)}
+#singerTools.singer-tools{display:flex;position:absolute;right:0;bottom:calc(100% + 9px);z-index:30;align-items:center;gap:6px;padding:9px;background:var(--card);border:1px solid var(--line);border-radius:13px;box-shadow:0 8px 28px rgba(0,0,0,.22);white-space:nowrap}
+#singerTools.singer-tools.off{display:none}
+#singerTools button{min-height:36px;padding:5px 10px}
+#speedrange{width:90px}
+#speedval{font-size:10px;min-width:42px}
+#bassTools{display:none;min-height:49px}
+#bassTools.on{display:flex}
+#bassTools .bass-tools-disclosure{width:100%}
+#bassTools .bass-tools-disclosure>summary{width:100%;justify-content:flex-start}
+.bass-tools-controls{display:flex;position:absolute;right:0;bottom:calc(100% + 9px);z-index:30;align-items:center;flex-wrap:wrap;gap:6px;width:min(94vw,390px);padding:10px;background:var(--card);border:1px solid var(--line);border-radius:13px;box-shadow:0 8px 28px rgba(0,0,0,.22)}
+.bass-tools-controls button{min-height:36px;padding:5px 9px}
+#chordtime{min-width:42px}
+#mainbar{padding-bottom:calc(6px + env(safe-area-inset-bottom,0px))}
+body.fc-reader-open #fcMiniPlayer{bottom:calc(103px + env(safe-area-inset-bottom,0px))!important}
+body.fc-main-nav-visible #fcMiniPlayer{bottom:calc(78px + env(safe-area-inset-bottom,0px))!important}
+.fc-mini-player{max-width:760px}
+.fc-mini-player .fc-mini-top{font-size:9px}
+.fc-mini-player .fc-mini-copy strong{font-size:12px}
+.fc-mini-player .fc-mini-copy span{font-size:10px}
+.fc-mini-next{min-height:29px}
+@media(min-width:700px){
+ .app-bottom-nav{left:50%;right:auto;bottom:12px;transform:translateX(-50%);width:min(calc(100% - 40px),650px);border:1px solid var(--line);border-radius:18px;padding:6px 10px;}
+ .view.primary-screen{padding-bottom:calc(86px + env(safe-area-inset-bottom,0px))!important}
+ #list{padding-left:max(18px,calc((100vw - 980px)/2));padding-right:max(18px,calc((100vw - 980px)/2))}
+ #rd{max-width:980px;margin:0 auto;width:100%;padding-left:32px!important;padding-right:32px!important}
+ .reader-toolbar,.bar#bassTools{padding-left:20px;padding-right:20px}
+ body.fc-reader-open #fcMiniPlayer{bottom:112px!important}
+ body.fc-main-nav-visible #fcMiniPlayer{bottom:95px!important}
+}
+@media(max-width:390px){
+ .app-bottom-nav button{font-size:9px;min-height:52px}
+ #mainbar button{padding-left:8px;padding-right:8px}
+ #play{min-width:78px}
+ #rd{padding-left:12px!important;padding-right:12px!important}
+ #rt{font-size:clamp(19px,5.4vw,26px)}
+}
+@media(prefers-reduced-motion:reduce){.app-bottom-nav,button{transition:none!important}}
+
+
+body.fc-session-pending #appNav{display:none!important}
+#vr{padding-bottom:env(safe-area-inset-bottom,0px)!important}
+body.fc-live-reader #rd{padding-bottom:calc(158px + env(safe-area-inset-bottom,0px))!important}
+body.fc-reader-open .fc-mini-player{left:7px;right:7px;gap:3px;padding:6px 8px 5px}
+body.fc-reader-open .fc-mini-top{font-size:8px;line-height:1.1}
+body.fc-reader-open .fc-mini-next{min-height:24px;padding:3px 6px}
+body.fc-reader-open .fc-mini-controls{gap:4px}
+body.fc-reader-open .fc-mini-controls button{min-height:28px;padding:3px 6px;font-size:9px}
+body.fc-reader-open .fc-mini-end-row{margin-top:-1px}
+body.fc-reader-open .fc-mini-end{min-height:25px!important;padding:2px 8px!important}
+@media(min-width:700px){body.fc-reader-open #rd{padding-bottom:calc(158px + env(safe-area-inset-bottom,0px))!important}}
+
 </style>
 
 <link rel="manifest" href="./manifest.webmanifest">
@@ -286,19 +399,13 @@ body{
 <link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png">
 <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png">
 </head>
-<body class="fc-session-pending">
-<section class="view on" id="vl">
+<body class="fc-session-pending fc-main-nav-visible">
+<section class="view on primary-screen" id="vl">
  <header><input id="q" type="search" placeholder="Buscar canción…" autocomplete="off" aria-label="Buscar canción"><button id="bnew" class="p" aria-label="Agregar canción">+</button></header>
- <nav class="tabs" aria-label="Navegación del repertorio">
-  <button id="tall" class="on" type="button" aria-pressed="true">Todas</button>
-  <button id="tset" type="button">Eventos</button>
-  <button id="tmode" class="mode-toggle" type="button" data-mode="s" aria-label="Cambiar a vista bajista" aria-pressed="false">Cantante</button>
-  <button id="bmenu" type="button" aria-label="Más opciones">Más</button>
- </nav>
  <div id="list"></div>
 </section>
 
-<section class="view" id="vse">
+<section class="view primary-screen" id="vse">
  <header><button id="eventsBack">‹ Lista</button><div style="flex:1"><strong>Eventos</strong></div><button id="eventNew" class="p">+ Nuevo</button></header>
  <div class="event-intro">
   <span class="event-kicker">REPERTORIOS GUARDADOS</span>
@@ -338,14 +445,19 @@ body{
 <section class="view" id="vr">
  <header><button id="bback">‹ Lista</button><div class="grow" style="flex:1"></div><button id="bedit">Editar</button></header>
  <div id="rd"><h1 id="rh"></h1><div id="rmeta"></div><div id="bassKeyBanner" class="bass-key-banner" aria-live="polite"></div><div id="rt"></div></div>
- <div class="bar" id="mainbar">
+ <div class="bar reader-toolbar" id="mainbar">
   <button id="fm" aria-label="Letra más chica">A−</button><button id="fp" aria-label="Letra más grande">A+</button><button id="play" class="p">▶ Auto</button>
-  <div id="singerTools" class="singer-tools"><button id="sm" aria-label="Más lento">−</button><input id="speedrange" class="speed-range" type="range" min="5" max="100" step="5" value="30" aria-label="Velocidad del desplazamiento"><button id="sp2" aria-label="Más rápido">+</button><span id="speedval">30 px/s</span></div>
+  <details class="reader-tools-disclosure"><summary>⚙ Ajustes</summary>
+   <div id="singerTools" class="singer-tools"><button id="sm" aria-label="Más lento">−</button><input id="speedrange" class="speed-range" type="range" min="5" max="100" step="5" value="30" aria-label="Velocidad del desplazamiento"><button id="sp2" aria-label="Más rápido">+</button><span id="speedval">30 px/s</span></div>
+  </details>
  </div>
  <div class="bar bass-tools" id="bassTools">
-  <span class="small-label">SEGUNDOS / ACORDE</span><button id="bslow" aria-label="Menos tiempo por acorde">−</button><span id="chordtime">2.5 s</span><button id="bfast" aria-label="Más tiempo por acorde">+</button>
-  <button id="bprev" aria-label="Acorde anterior">◀</button><button id="bnext" aria-label="Siguiente acorde">▶</button>
-  <button id="blang" title="Cambiar nomenclatura">EN ▾</button><button id="tdn" aria-label="Bajar un semitono">♭</button><span id="trl">0</span><button id="tup" aria-label="Subir un semitono">♯</button><button id="tr0">0</button>
+  <details class="reader-tools-disclosure bass-tools-disclosure"><summary>🎼 Ajustes de acordes</summary>
+   <div class="bass-tools-controls"><span class="small-label">SEGUNDOS / ACORDE</span><button id="bslow" aria-label="Menos tiempo por acorde">−</button><span id="chordtime">2.5 s</span><button id="bfast" aria-label="Más tiempo por acorde">+</button>
+    <button id="bprev" aria-label="Acorde anterior">◀</button><button id="bnext" aria-label="Siguiente acorde">▶</button>
+    <button id="blang" title="Cambiar nomenclatura">EN ▾</button><button id="tdn" aria-label="Bajar un semitono">♭</button><span id="trl">0</span><button id="tup" aria-label="Subir un semitono">♯</button><button id="tr0">0</button>
+   </div>
+  </details>
  </div>
 </section>
 <section class="view" id="ve">
@@ -384,7 +496,7 @@ body{
   <div class="edit-actions"><button id="esave" class="p">Guardar</button><button id="ecancel">Cancelar</button><button id="edel">Borrar</button></div>
  </div>
 </section>
-<section class="view" id="vm">
+<section class="view primary-screen" id="vm">
  <div class="menu-content">
   <!-- Campo auxiliar: solo se muestra si el portapapeles no está disponible al crear un respaldo. -->
   <textarea id="mi" class="backup-fallback" hidden aria-label="Respaldo de Frecuencia Cero"></textarea>
@@ -395,12 +507,18 @@ body{
   </div>
   <p id="mmsg" class="note" aria-live="polite"></p>
   <div class="fc-app-meta">
-   <span id="fcAppVersion">Frecuencia Cero · V27</span>
+   <span id="fcAppVersion">Frecuencia Cero · V28</span>
    <button id="fcCheckUpdates" type="button">↻ Buscar actualizaciones</button>
   </div>
   <p id="fcUpdateStatus" class="fc-update-status" aria-live="polite">La versión instalada se conserva al actualizar.</p>
  </div>
 </section>
+<nav class="tabs app-bottom-nav" id="appNav" aria-label="Navegación principal">
+  <button id="tall" class="on" type="button" aria-pressed="true">Todas</button>
+  <button id="tset" type="button">Eventos</button>
+  <button id="tmode" class="mode-toggle" type="button" data-mode="s" aria-label="Cambiar a vista bajista" aria-pressed="false">Cantante</button>
+  <button id="bmenu" type="button" aria-label="Más opciones">Más</button>
+ </nav>
 <script>
 'use strict';
 var KEY='letras_frecuencia_cero_v3',EVENT_KEY='frecuencia_cero_eventos_v1',songs=[],events=[],cur=null,filt='all',fs=30,defaultSpeed=30,speed=30,scrollFrame=null,wl=null,editId=null,mode='s',bassNotation='en',bassEvents=[],bassIndex=0,chordTimer=null,currentEventId=null,eventEditId=null,eventDraftSongIds=[],songReturnView='vl';
@@ -477,7 +595,13 @@ function seedCatalog(){
  save();return added;
 }
 function saveEvents(){safeStore(EVENT_KEY,JSON.stringify(events))}
-function show(id){['vl','vse','vset','vplaylist','vr','ve','vm'].forEach(function(v){$(v).classList.toggle('on',v===id)})}
+function show(id){
+ ['vl','vse','vset','vplaylist','vr','ve','vm'].forEach(function(v){$(v).classList.toggle('on',v===id)});
+ var nav=$('appNav'),primary=['vl','vse','vm'].indexOf(id)>=0;
+ if(nav)nav.hidden=!primary;
+ document.body.classList.toggle('fc-main-nav-visible',primary);
+ ['tall','tset','bmenu'].forEach(function(k){if($(k))$(k).classList.toggle('on',(id==='vl'&&k==='tall')||(id==='vse'&&k==='tset')||(id==='vm'&&k==='bmenu'))});
+}
 function find(id){return songs.find(function(s){return s.id===id})}
 function findEvent(id){return events.find(function(e){return e.id===id})}
 function seedLegacyEvent(){events=events.filter(function(e){var n=norm(e.name||'');return e.id!=='evt_import_test'&&n!=='prueba de evento'&&n!=='evento importado'});if(!events.length){var starred=songs.filter(function(s){return s.star}).map(function(s){return s.id});if(starred.length)events.push({id:'evt_legacy',name:'Evento anterior',songIds:starred,updatedAt:Date.now()})}events=events.map(function(e){if(!Array.isArray(e.songIds))e.songIds=[];return e});saveEvents()}
@@ -721,7 +845,7 @@ function importText(raw){
  });save();render();return {count:n,converted:convertedTotal};
 }
 function importBackupOrText(raw){try{var data=JSON.parse(raw);if(data&&data.format==='letras-repertorio-v2'&&Array.isArray(data.songs)){songs=data.songs.filter(function(s){return s&&s.title}).map(function(s,i){if(!s.id)s.id='restored_'+i;if(s.text==null)s.text='';if(s.section!=='keyboard'&&s.section!=='accordion')s.section='accordion';if(s.durationSec==null)s.durationSec=estimateDurationSeconds(s.text);if(s.chordSeconds==null)s.chordSeconds=3.0;if(s.scrollSpeed==null)s.scrollSpeed=defaultSpeed;return s});if(Array.isArray(data.events))events=data.events;seedCatalog();seedLegacyEvent();saveEvents();save();render();renderEvents();return {count:songs.length,backup:true}}}catch(e){}return {count:importText(raw),backup:false}}
-$('q').oninput=render;$('tall').onclick=function(){filt='all';$('tall').classList.add('on');$('tall').setAttribute('aria-pressed','true');$('tset').classList.remove('on');render()};$('tset').onclick=function(){renderEvents();show('vse')};
+$('q').oninput=render;$('tall').onclick=function(){filt='all';$('tall').setAttribute('aria-pressed','true');show('vl');render()};$('tset').onclick=function(){renderEvents();show('vse')};
 $('tmode').onclick=function(){mode=mode==='s'?'b':'s';safeStore('letras_mode',mode);syncModeButton();if($('vr').classList.contains('on')){stopAll();bassIndex=0;paint();$('rd').scrollTop=0}};
 $('bnew').onclick=function(){edit(null)};$('bedit').onclick=function(){edit(cur&&cur.id)};$('bback').onclick=function(){stopAll();show(songReturnView==='vplaylist'?'vplaylist':'vl');if(songReturnView==='vplaylist')renderEventPlaylist()};$('ecancel').onclick=function(){show(editId?'vr':'vl')};
 $('esave').onclick=function(){
@@ -744,7 +868,7 @@ $('esave').onclick=function(){
 $('edel').onclick=function(){if(!editId)return;if(confirm('¿Borrar esta canción?')){songs=songs.filter(function(s){return s.id!==editId});save();render();show('vl')}};
 $('ekey').onchange=updatePalette;$('eprocessChords').onclick=processChordImport;$('bmenu').onclick=function(){$('mmsg').textContent='';show('vm')};$('mback').onclick=function(){show('vl')};
 $('mexp').onclick=function(){var data={format:'letras-repertorio-v2',songs:songs,events:events};var text=JSON.stringify(data,null,2);var field=$('mi');field.value=text;if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(text).then(function(){field.hidden=true;$('mmsg').textContent='Respaldo copiado. Guárdalo en Notas o Drive.'}).catch(function(){field.hidden=false;$('mmsg').textContent='No se pudo copiar automáticamente. El respaldo quedó visible abajo para que puedas copiarlo.'})}else{field.hidden=false;$('mmsg').textContent='El respaldo quedó visible abajo. Mantén pulsado el texto para copiarlo.'}};
-$('mth').onclick=function(){var d=document.documentElement,theme=d.getAttribute('data-theme'),dark=theme?theme==='dark':matchMedia('(prefers-color-scheme: dark)').matches;d.setAttribute('data-theme',dark?'light':'dark')};
+$('mth').onclick=function(){var d=document.documentElement,theme=d.getAttribute('data-theme')||'dark',next=theme==='dark'?'light':'dark';d.setAttribute('data-theme',next);safeStore('fc_theme_preference',next);var meta=document.querySelector('meta[name=theme-color]');if(meta)meta.content=next==='dark'?'#0d1117':'#f3f5f7'};
 $('fm').onclick=function(){fs=Math.max(16,fs-2);$('rt').style.fontSize=fs+'px';$('rh').style.fontSize=(fs*.6)+'px';safeStore('letras_fs',String(fs))};$('fp').onclick=function(){fs=Math.min(72,fs+2);$('rt').style.fontSize=fs+'px';$('rh').style.fontSize=(fs*.6)+'px';safeStore('letras_fs',String(fs))};
 $('speedrange').oninput=function(){speedChange(this.value)};$('sm').onclick=function(){speedChange(speed-5)};$('sp2').onclick=function(){speedChange(speed+5)};
 $('play').onclick=function(){if(mode==='b')startBassAuto();else goSinger()};$('bslow').onclick=function(){changeChordInterval(-.2)};$('bfast').onclick=function(){changeChordInterval(.2)};$('bprev').onclick=function(){if(!bassEvents.length)return;setActiveBassEvent(bassIndex-1,true)};$('bnext').onclick=function(){if(!bassEvents.length)return;setActiveBassEvent(bassIndex+1,true)};
@@ -779,12 +903,12 @@ syncModeButton();setNotation();render();
 <!-- Generación y lectura de QR para vincular otro dispositivo al mismo perfil -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
-<script src="./fc-sync.js?v=27"></script>
+<script src="./fc-sync.js?v=28"></script>
 
 <script>
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function () {
-    navigator.serviceWorker.register('./sw.js?v=27').catch(function (err) {
+    navigator.serviceWorker.register('./sw.js?v=28').catch(function (err) {
       console.warn('No se pudo registrar el modo sin conexión:', err);
     });
   });

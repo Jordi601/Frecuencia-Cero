@@ -1,0 +1,11 @@
+Frecuencia Cero V28 – Optimización móvil
+
+- Navegación inferior estilo aplicación en Catálogo, Eventos y Más.
+- Tema oscuro como apariencia inicial; el tema elegido se conserva por dispositivo.
+- Más espacio útil para letras y acordes: se elimina el margen inferior artificial de 45vh.
+- Controles avanzados de cantante y acordes dentro de paneles desplegables; no se eliminan funciones.
+- Safe areas de iPhone respetadas con fondo continuo hasta el borde inferior.
+- Reproductor flotante compactado en la vista de canción y reubicado para no chocar con la navegación inferior.
+- Se conservan perfiles, catálogo, bloques Acordeón/Teclado, importador de acordes, eventos, cola en vivo, reconocimiento de voz, QR, invitaciones, revocación y Firebase.
+
+No requiere reglas nuevas de Firebase.

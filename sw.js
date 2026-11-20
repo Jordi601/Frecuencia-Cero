@@ -1,8 +1,8 @@
-const CACHE_NAME = 'frecuencia-cero-shell-v27-end-event-global-stop';
+const CACHE_NAME = 'frecuencia-cero-shell-v28-mobile-bottom-navigation-dark';
 const APP_FILES = [
   './',
   './index.html',
-  './fc-sync.js?v=27',
+  './fc-sync.js?v=28',
   './manifest.webmanifest',
   './icon-192.png',
   './icon-512.png',
